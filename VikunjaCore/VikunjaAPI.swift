@@ -921,6 +921,14 @@ enum VikunjaAPI {
         }
     }
 
+    struct CommentPage: Equatable {
+        let items: [VikunjaComment]
+        let page: Int
+        let totalPages: Int
+
+        var hasEarlierPage: Bool { page < totalPages }
+    }
+
     /// Thrown by `searchDoneTasks` when the server doesn't support v2 — there
     /// is no v1 equivalent for server-side search, so `TaskStore` catches this
     /// (and any other failure) the same way: fall back to client-side
@@ -988,6 +996,12 @@ enum VikunjaAPI {
         _ = try await send(request)
     }
 
+    private static func putV2<T: Decodable>(_ path: String, body: Data, as type: T.Type) async throws -> T {
+        let request = makeRequest(path, method: "PUT", body: body, base: v2BaseURL)
+        let (data, _) = try await send(request)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
     private static func deleteV2(_ path: String) async throws {
         let request = makeRequest(path, method: "DELETE", base: v2BaseURL)
         _ = try await send(request)
@@ -1021,6 +1035,37 @@ enum VikunjaAPI {
         let path = "/tasks?filter=done+%3D+true&q=\(encoded)&sort_by=done_at&order_by=desc&per_page=50&page=1"
         let result: V2Page<VikunjaTask> = try await getV2(path, as: V2Page<VikunjaTask>.self)
         return result.items ?? []
+    }
+
+    // MARK: - Task comments (v2 only, verified against Vikunja 2.6)
+
+    static func fetchCommentPage(taskId: Int, page: Int = 1, perPage: Int = 50) async throws -> CommentPage {
+        guard supportsAPIv2 else { throw V2NotAvailable() }
+        let path = "/tasks/\(taskId)/comments?per_page=\(perPage)&page=\(page)"
+        let decoded: V2Page<VikunjaComment> = try await getV2(path, as: V2Page<VikunjaComment>.self)
+        return CommentPage(items: decoded.items ?? [], page: decoded.page ?? page, totalPages: max(1, decoded.totalPages ?? 1))
+    }
+
+    static func createComment(taskId: Int, comment: String) async throws -> VikunjaComment {
+        guard supportsAPIv2 else { throw V2NotAvailable() }
+        let body = try JSONEncoder().encode(["comment": comment])
+        return try await postV2("/tasks/\(taskId)/comments", body: body, as: VikunjaComment.self)
+    }
+
+    static func updateComment(taskId: Int, commentId: Int, comment: String) async throws -> VikunjaComment {
+        guard supportsAPIv2 else { throw V2NotAvailable() }
+        let body = try JSONEncoder().encode(["comment": comment])
+        return try await putV2("/tasks/\(taskId)/comments/\(commentId)", body: body, as: VikunjaComment.self)
+    }
+
+    static func deleteComment(taskId: Int, commentId: Int) async throws {
+        guard supportsAPIv2 else { throw V2NotAvailable() }
+        try await deleteV2("/tasks/\(taskId)/comments/\(commentId)")
+    }
+
+    static func fetchCurrentUser() async throws -> VikunjaCurrentUser {
+        guard supportsAPIv2 else { throw V2NotAvailable() }
+        return try await getV2("/user", as: VikunjaCurrentUser.self)
     }
 
     private static func makeRequest(_ path: String, method: String = "GET", body: Data? = nil, base: String? = nil) -> URLRequest {

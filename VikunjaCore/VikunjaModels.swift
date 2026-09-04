@@ -11,6 +11,10 @@ struct VikunjaTask: Codable {
     var labels: [VikunjaLabel]?
     var description: String?
     var updated: String?
+    /// Optional/defaulted so old cached task data and memberwise task fixtures keep decoding/compiling.
+    var created: String? = nil
+    /// Vikunja uses the zero date for an incomplete task; use `doneAtDate` rather than this raw value.
+    var doneAt: String? = nil
     var priority: Int?
     var reminders: [VikunjaReminder]?
     var repeatAfter: Int?
@@ -21,15 +25,28 @@ struct VikunjaTask: Codable {
         case id, title, done, labels, description, priority, reminders
         case dueDate = "due_date"
         case projectId = "project_id"
-        case updated
+        case updated, created
+        case doneAt = "done_at"
         case repeatAfter = "repeat_after"
         case repeatMode = "repeat_mode"
         case relatedTasks = "related_tasks"
     }
 
+    private static func date(from raw: String?) -> Date? {
+        guard let raw, !raw.hasPrefix("0001") else { return nil }
+        return ISO8601DateFormatter().date(from: raw)
+    }
+
     var effectiveDueDate: Date? {
-        guard let str = dueDate, !str.hasPrefix("0001") else { return nil }
-        return ISO8601DateFormatter().date(from: str)
+        Self.date(from: dueDate)
+    }
+
+    var createdDate: Date? {
+        Self.date(from: created)
+    }
+
+    var doneAtDate: Date? {
+        Self.date(from: doneAt)
     }
 
     /// True while at least one reminder is still ahead of us. Fired reminders stop
@@ -59,6 +76,36 @@ struct VikunjaTask: Codable {
         let all = subtasks
         return (all.filter { $0.done }.count, all.count)
     }
+}
+
+struct VikunjaCommentAuthor: Codable, Identifiable, Equatable {
+    let id: Int
+    let name: String?
+    let username: String?
+}
+
+struct VikunjaComment: Codable, Identifiable, Equatable {
+    let id: Int
+    let comment: String
+    let author: VikunjaCommentAuthor
+    let created: String?
+    let updated: String?
+
+    var createdDate: Date? {
+        guard let created, !created.hasPrefix("0001") else { return nil }
+        return ISO8601DateFormatter().date(from: created)
+    }
+
+    var updatedDate: Date? {
+        guard let updated, !updated.hasPrefix("0001") else { return nil }
+        return ISO8601DateFormatter().date(from: updated)
+    }
+}
+
+struct VikunjaCurrentUser: Codable, Identifiable, Equatable {
+    let id: Int
+    let name: String?
+    let username: String?
 }
 
 struct VikunjaLabel: Codable, Identifiable {

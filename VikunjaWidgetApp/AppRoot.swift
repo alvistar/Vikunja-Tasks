@@ -283,6 +283,11 @@ struct AppRoot: View {
         .sheet(isPresented: $showBulkImport) {
             BulkImportSheet(store: store)
         }
+        .onChange(of: store.pendingChangesRequested) { _, requested in
+            guard requested else { return }
+            showPendingChanges = true
+            store.pendingChangesRequested = false
+        }
         .sheet(isPresented: $showPendingChanges) {
             PendingChangesSheet(store: store)
         }
@@ -336,7 +341,7 @@ struct AppRoot: View {
         if VikunjaConfig.isConfigured {
             OfflinePill(
                 isOnline: store.reachability.isOnline,
-                pendingCount: store.outbox.ops.count,
+                pendingCount: store.pendingOperationCount,
                 isReconnecting: store.transientRefreshFailure,
                 isUpdating: store.isShowingStaleData,
                 onTapPending: { showPendingChanges = true }
@@ -550,7 +555,7 @@ struct AppRoot: View {
                 .help("Bulk Import Tasks")
             }
             ToolbarItem(placement: .status) {
-                OfflinePill(isOnline: store.reachability.isOnline, pendingCount: store.outbox.ops.count, isReconnecting: store.transientRefreshFailure, isUpdating: store.isShowingStaleData, onTapPending: { showPendingChanges = true })
+                OfflinePill(isOnline: store.reachability.isOnline, pendingCount: store.pendingOperationCount, isReconnecting: store.transientRefreshFailure, isUpdating: store.isShowingStaleData, onTapPending: { showPendingChanges = true })
             }
         }
         #endif

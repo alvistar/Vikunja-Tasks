@@ -68,6 +68,7 @@ struct InlineTaskEditor: View {
 
     // Subtask state
     @State private var loadedSubtasks: [VikunjaTask]? = nil
+    @State private var loadedActivityTask: VikunjaTask? = nil
     @State private var newSubtaskTitle = ""
     @State private var isAddingSubtask = false
 
@@ -123,6 +124,7 @@ struct InlineTaskEditor: View {
                 if let subtasks = loadedSubtasks {
                     subtasksCard(subtasks).padding(.top, 16)
                 }
+                TaskActivityView(task: loadedActivityTask ?? task).padding(.top, 16)
                 hairline.frame(height: 1).padding(.top, 16)
                 footerRow.padding(.top, 15)
             }
@@ -152,8 +154,10 @@ struct InlineTaskEditor: View {
             let subtaskStart = Date()
             if task.id > 0, let full = try? await VikunjaAPI.fetchTask(id: task.id) {
                 loadedSubtasks = full.subtasks
+                loadedActivityTask = full
             } else {
                 loadedSubtasks = task.subtasks.isEmpty ? [] : task.subtasks
+                loadedActivityTask = task
             }
             let subtaskElapsed = Date().timeIntervalSince(subtaskStart)
             DiagnosticLog.info("subtask fetch task \(task.id) → \(loadedSubtasks?.count ?? 0) subtasks, \(String(format: "%.1f", subtaskElapsed)) s")

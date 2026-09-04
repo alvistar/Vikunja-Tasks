@@ -39,6 +39,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - VeyrnCoreTests
     profile:
       config: Release
     analyze:
@@ -132,6 +134,22 @@ targets:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
       - sdk: AppIntents.framework
+
+  VeyrnCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: VeyrnCoreTests
+      - path: VikunjaCore
+        includes:
+          - Outbox.swift
+          - CommentOutbox.swift
+          - TaskActivity.swift
+          - TaskMerger.swift
+          - VikunjaModels.swift
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
 
   # ── iOS ──────────────────────────────────────────────────────────────────
 

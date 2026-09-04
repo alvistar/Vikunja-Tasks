@@ -68,6 +68,7 @@ final class TaskStore {
     // MARK: - Offline infrastructure
 
     private(set) var outbox: Outbox
+    private(set) var commentOutbox: CommentOutbox
 
     /// Per-account expansion state for the nested project lists. Replaced on
     /// account switch alongside `outbox` (see `resetPerAccountState`).
@@ -83,10 +84,74 @@ final class TaskStore {
     init() {
         let accountId = VikunjaConfig.activeAccount?.id
         outbox = Outbox(accountId: accountId)
+        commentOutbox = CommentOutbox(accountId: accountId)
         projectExpansion = ProjectExpansion(accountId: accountId)
         loadCache()
         observeReachability()
     }
+
+    // MARK: - Comment queue
+
+    func queueComment(task: VikunjaTask, text: String) {
+        let ref: TaskRef
+        if task.id > 0 { ref = .server(task.id) }
+        else if let client = outbox.clientId(forPlaceholder: task.id) { ref = .client(client) }
+        else { return }
+        _ = commentOutbox.create(taskRef: ref, text: text)
+        Task { await drainCommentOutbox() }
+    }
+
+    func queueCommentUpdate(task: VikunjaTask, commentId: Int, text: String) {
+        guard task.id > 0 else { return }
+        commentOutbox.update(taskRef: .server(task.id), serverId: commentId, clientCommentId: UUID(), text: text)
+        Task { await drainCommentOutbox() }
+    }
+
+    func queueCommentDelete(task: VikunjaTask, commentId: Int) {
+        guard task.id > 0 else { return }
+        commentOutbox.delete(taskRef: .server(task.id), serverId: commentId, clientCommentId: UUID())
+        Task { await drainCommentOutbox() }
+    }
+
+    func drainCommentOutbox() async {
+        guard !isDrainingComments else {
+            commentDrainRequestedWhileDraining = true
+            return
+        }
+        guard reachability.isOnline else { return }
+        isDrainingComments = true
+        defer { isDrainingComments = false }
+        repeat {
+            commentDrainRequestedWhileDraining = false
+            let snapshot = commentOutbox.eligibleOperations()
+            for op in snapshot {
+            guard case .server(let taskId) = op.taskRef else { continue }
+            do {
+                switch op.kind {
+                case .create:
+                    _ = try await VikunjaAPI.createComment(taskId: taskId, comment: op.text)
+                case .update(let commentId):
+                    _ = try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
+                case .delete(let commentId):
+                    try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
+                }
+                commentOutbox.acknowledge(id: op.id)
+            } catch let error as VikunjaAPI.APIError where error.isAuthFailure || error.isRateLimited {
+                commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+            } catch let error as VikunjaAPI.APIError where error.isGone || error.isClient4xx {
+                commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
+            } catch {
+                commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+            }
+            }
+        } while commentDrainRequestedWhileDraining && reachability.isOnline
+    }
+
+    var pendingOperationCount: Int {
+        outbox.ops.count + commentOutbox.operations.count
+    }
+
+    var pendingChangesRequested = false
 
     // MARK: - Derived helpers
 
@@ -539,6 +604,7 @@ final class TaskStore {
         logbookSearchResults = nil
 
         outbox = Outbox(accountId: accountId)
+        commentOutbox = CommentOutbox(accountId: accountId)
         projectExpansion = ProjectExpansion(accountId: accountId)
         loggedProjectCycle = false
         DiagnosticLog.info("outbox replaced")
@@ -803,6 +869,8 @@ final class TaskStore {
     /// walking the queue, so the request can be honored by another pass rather
     /// than thrown away. The drain equivalent of `coalescedRefresh`.
     private var drainRequestedWhileDraining = false
+    private var isDrainingComments = false
+    private var commentDrainRequestedWhileDraining = false
 
     /// Upper bound on passes per `drainOutbox()` call. Termination doesn't
     /// rest on it — a pass that achieves nothing and isn't chasing a newly
@@ -1019,6 +1087,7 @@ final class TaskStore {
                     )
                     if case .client(let uuid) = op.ref {
                         outbox.remap(client: uuid, toServer: created.id)
+                        commentOutbox.remap(taskClientId: uuid, toServerId: created.id)
                     }
                     DiagnosticLog.info("op create task \(created.id) → ok")
                 case .update(let update):
@@ -1365,6 +1434,7 @@ final class TaskStore {
         for (offset, op) in run.enumerated() {
             if offset < created.count, case .client(let uuid) = op.ref {
                 outbox.remap(client: uuid, toServer: created[offset].id)
+                commentOutbox.remap(taskClientId: uuid, toServerId: created[offset].id)
             }
             outbox.remove(id: op.id)
         }
@@ -1453,6 +1523,7 @@ final class TaskStore {
                 guard let self else { return }
                 if self.reachability.isOnline {
                     await self.drainOutbox()
+                    await self.drainCommentOutbox()
                 }
                 self.observeReachability()
             }
@@ -1470,6 +1541,7 @@ final class TaskStore {
                 try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { break }
                 await self?.drainOutbox()
+                await self?.drainCommentOutbox()
                 await self?.refreshIfStale(background: true, reason: "poll")
             }
         }
