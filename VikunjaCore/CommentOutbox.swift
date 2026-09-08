@@ -42,6 +42,20 @@ struct LocalCommentOverlay: Identifiable, Equatable {
     let state: State
 }
 
+/// What `load()` found wrong, if anything. Surfaced as state rather than logged
+/// from here: this type is deliberately Foundation-only so the unit-test bundle
+/// can compile it without dragging in `VikunjaConfig` and the Keychain.
+enum CommentOutboxLoadIssue: Equatable {
+    /// Individual records were malformed and skipped; the rest survived.
+    case droppedRecords(Int)
+    /// The whole payload was undecodable. It has been copied to a quarantine
+    /// key and this queue starts empty.
+    case unreadable
+    /// Written by a newer build. The queue is empty AND read-only, so we do
+    /// not overwrite data this version cannot represent.
+    case newerSchema(found: Int)
+}
+
 @Observable
 final class CommentOutbox {
     private struct Envelope: Codable {
@@ -50,15 +64,41 @@ final class CommentOutbox {
         var operations: [PendingCommentOperation]
     }
 
+    /// Decode-side twin of `Envelope`. Each element decodes independently, so a
+    /// single malformed record cannot make the whole array undecodable and take
+    /// every other queued comment with it.
+    private struct LenientEnvelope: Decodable {
+        let version: Int
+        let operations: [Lenient<PendingCommentOperation>]
+    }
+
+    private struct Lenient<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+    }
+
     private static let keyPrefix = "vikunja.commentOutbox.v1"
     private let key: String
+    private var quarantineKey: String { "\(key).quarantine" }
     private let defaults: UserDefaults
     private(set) var operations: [PendingCommentOperation] = []
+
+    /// Set when the persisted payload was written by a newer schema version.
+    /// `persist()` becomes a no-op: an empty v1 envelope written over a v2
+    /// payload would destroy a queue this build merely cannot read.
+    private(set) var isReadOnly = false
+    private(set) var loadIssue: CommentOutboxLoadIssue?
 
     init(defaults: UserDefaults = .standard, accountId: UUID? = nil) {
         self.defaults = defaults
         self.key = accountId.map { "\(Self.keyPrefix).\($0.uuidString)" } ?? Self.keyPrefix
         load()
+    }
+
+    /// Every persisted key this outbox owns, so account deletion can purge them.
+    static func persistedKeys(accountId: UUID) -> [String] {
+        let base = "\(keyPrefix).\(accountId.uuidString)"
+        return [base, "\(base).quarantine"]
     }
 
     func create(taskRef: TaskRef, text: String) -> PendingCommentOperation {
@@ -76,11 +116,10 @@ final class CommentOutbox {
             operations[index].text = text
             operations[index].state = .pending
             operations[index].errorMessage = nil
-        } else if let serverId {
-            operations.removeAll {
-                if case .update(let queuedId) = $0.kind { return queuedId == serverId }
-                return false
-            }
+        } else if let serverId, !hasQueuedDelete(forServerId: serverId) {
+            // Refuse rather than displace when a delete is already queued:
+            // replacing it would resurrect a comment the user deleted.
+            removeQueuedOps(forServerId: serverId)
             operations.append(PendingCommentOperation(
                 id: UUID(), clientCommentId: clientCommentId, taskRef: taskRef, text: text,
                 kind: .update(serverId: serverId), state: .pending, errorMessage: nil, timestamp: .now
@@ -93,16 +132,36 @@ final class CommentOutbox {
         if let index = operations.firstIndex(where: { $0.clientCommentId == clientCommentId && $0.kind == .create }) {
             operations.remove(at: index)
         } else if let serverId {
-            operations.removeAll {
-                if case .update(let queuedId) = $0.kind { return queuedId == serverId }
-                return false
-            }
+            removeQueuedOps(forServerId: serverId)
             operations.append(PendingCommentOperation(
                 id: UUID(), clientCommentId: clientCommentId, taskRef: taskRef, text: "",
                 kind: .delete(serverId: serverId), state: .pending, errorMessage: nil, timestamp: .now
             ))
         }
         persist()
+    }
+
+    /// Displace every queued op targeting this comment, whatever its kind.
+    ///
+    /// This used to match `.update` only, so a queued `.delete` was never
+    /// displaced and a second delete appended a second op for the same
+    /// serverId. `TaskActivityProjection` keys overlays by serverId, and that
+    /// duplicate pair trapped on `Dictionary(uniqueKeysWithValues:)` — a crash
+    /// on every open of the task, persisted, with no in-app way out.
+    private func removeQueuedOps(forServerId serverId: Int) {
+        operations.removeAll {
+            switch $0.kind {
+            case .create: return false
+            case .update(let id), .delete(let id): return id == serverId
+            }
+        }
+    }
+
+    private func hasQueuedDelete(forServerId serverId: Int) -> Bool {
+        operations.contains {
+            if case .delete(let id) = $0.kind { return id == serverId }
+            return false
+        }
     }
 
     func remap(taskClientId: UUID, toServerId serverId: Int) {
@@ -181,21 +240,39 @@ final class CommentOutbox {
 
     private func load() {
         guard let data = defaults.data(forKey: key) else { return }
-        do {
-            let envelope = try JSONDecoder().decode(Envelope.self, from: data)
-            guard envelope.version == Envelope.currentVersion else {
-                return
-            }
-            operations = envelope.operations
-        } catch {
+
+        guard let envelope = try? JSONDecoder().decode(LenientEnvelope.self, from: data) else {
+            // Nothing readable at all. Keep the bytes under a quarantine key
+            // instead of letting the next persist() overwrite them: a decoder
+            // bug is recoverable from the original data, not from what we
+            // replaced it with.
+            defaults.set(data, forKey: quarantineKey)
+            loadIssue = .unreadable
+            return
         }
+
+        // A newer build wrote this. Start empty and refuse to write, rather
+        // than clobbering a queue this version cannot represent.
+        guard envelope.version <= Envelope.currentVersion else {
+            isReadOnly = true
+            loadIssue = .newerSchema(found: envelope.version)
+            return
+        }
+
+        operations = envelope.operations.compactMap(\.value)
+        let dropped = envelope.operations.count - operations.count
+        if dropped > 0 { loadIssue = .droppedRecords(dropped) }
     }
 
     private func persist() {
+        guard !isReadOnly else { return }
         do {
             let envelope = Envelope(version: Envelope.currentVersion, operations: operations)
             defaults.set(try JSONEncoder().encode(envelope), forKey: key)
         } catch {
+            // Encoding our own Codable types cannot fail in practice, but if it
+            // ever does the queue is not durable and that must not be silent.
+            loadIssue = .unreadable
         }
     }
 }

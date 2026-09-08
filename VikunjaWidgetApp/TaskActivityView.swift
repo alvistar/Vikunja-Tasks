@@ -424,11 +424,24 @@ struct TaskActivityView: View {
         do {
             let result = try await VikunjaAPI.fetchCommentPage(taskId: task.id, page: page)
             if append {
-                var merged = Dictionary(uniqueKeysWithValues: comments.map { ($0.id, $0) })
+                // `uniquingKeysWith`, matching VikunjaAPI.swift:107 — a duplicate
+                // id traps. Overlapping pages are exactly what paging exposes us
+                // to when someone else writes while the user is loading.
+                var merged = Dictionary(
+                    comments.map { ($0.id, $0) },
+                    uniquingKeysWith: { _, latest in latest }
+                )
                 for comment in result.items { merged[comment.id] = comment }
                 comments = Array(merged.values)
             } else {
-                comments = result.items
+                // The server can repeat an id within one page too; dedupe here
+                // as well or the next append traps on the seeded duplicate.
+                comments = Array(
+                    Dictionary(
+                        result.items.map { ($0.id, $0) },
+                        uniquingKeysWith: { _, latest in latest }
+                    ).values
+                )
             }
             comments.sort { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
             self.page = result.page

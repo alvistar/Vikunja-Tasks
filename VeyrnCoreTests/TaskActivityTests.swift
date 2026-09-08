@@ -36,4 +36,25 @@ final class TaskActivityTests: XCTestCase {
         outbox.delete(taskRef: .server(1), serverId: nil, clientCommentId: created.clientCommentId)
         XCTAssertTrue(outbox.operations.isEmpty)
     }
+
+    /// Pins the crash: two overlays sharing a serverId used to trap
+    /// `Dictionary(uniqueKeysWithValues:)` inside `project()`. Because the
+    /// overlays come from a queue persisted in UserDefaults, that trap was a
+    /// crash on every open of the task, across relaunches, unrecoverable in-app.
+    func testDuplicateOverlayServerIdsDoNotTrapTheProjection() {
+        let outbox = CommentOutbox(defaults: freshDefaults(), accountId: UUID())
+        outbox.delete(taskRef: .server(1), serverId: 7, clientCommentId: UUID())
+        outbox.delete(taskRef: .server(1), serverId: 7, clientCommentId: UUID())
+
+        let overlays = outbox.overlays(for: .server(1))
+        let task = VikunjaTask(id: 1, title: "T", done: false, projectId: 1)
+
+        // Must not trap.
+        let items = TaskActivityProjection.project(task: task, comments: [], overlays: overlays)
+        XCTAssertTrue(items.allSatisfy { $0.commentId != 7 }, "a queued delete tombstones the comment")
+    }
+
+    private func freshDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "VeyrnCoreTests.projection.\(UUID().uuidString)")!
+    }
 }

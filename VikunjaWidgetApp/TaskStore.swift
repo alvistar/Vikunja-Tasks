@@ -86,6 +86,7 @@ final class TaskStore {
         outbox = Outbox(accountId: accountId)
         commentOutbox = CommentOutbox(accountId: accountId)
         projectExpansion = ProjectExpansion(accountId: accountId)
+        logCommentOutboxLoadIssue()
         loadCache()
         observeReachability()
     }
@@ -113,6 +114,22 @@ final class TaskStore {
         Task { await drainCommentOutbox() }
     }
 
+    /// `CommentOutbox` is deliberately Foundation-only so the unit-test bundle
+    /// can compile it without the Keychain, so it reports load damage as state
+    /// instead of logging. Counts only — never comment text.
+    private func logCommentOutboxLoadIssue() {
+        switch commentOutbox.loadIssue {
+        case .none:
+            break
+        case .droppedRecords(let count):
+            DiagnosticLog.warn("comment outbox: dropped \(count) malformed record(s)")
+        case .unreadable:
+            DiagnosticLog.error("comment outbox: payload unreadable, quarantined")
+        case .newerSchema(let found):
+            DiagnosticLog.error("comment outbox: schema v\(found) is newer than this build; read-only")
+        }
+    }
+
     func drainCommentOutbox() async {
         guard !isDrainingComments else {
             commentDrainRequestedWhileDraining = true
@@ -125,24 +142,45 @@ final class TaskStore {
             commentDrainRequestedWhileDraining = false
             let snapshot = commentOutbox.eligibleOperations()
             for op in snapshot {
-            guard case .server(let taskId) = op.taskRef else { continue }
-            do {
-                switch op.kind {
-                case .create:
-                    _ = try await VikunjaAPI.createComment(taskId: taskId, comment: op.text)
-                case .update(let commentId):
-                    _ = try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
-                case .delete(let commentId):
-                    try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
+                guard case .server(let taskId) = op.taskRef else { continue }
+                do {
+                    switch op.kind {
+                    case .create:
+                        _ = try await VikunjaAPI.createComment(taskId: taskId, comment: op.text)
+                    case .update(let commentId):
+                        _ = try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
+                    case .delete(let commentId):
+                        try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
+                    }
+                    commentOutbox.acknowledge(id: op.id)
+                } catch let error as VikunjaAPI.APIError where error.isAuthFailure || error.isRateLimited {
+                    commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+                } catch let error as VikunjaAPI.APIError where error.isGone || error.isClient4xx {
+                    commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
+                } catch {
+                    // The request failed without an HTTP answer — a timeout, a
+                    // dropped connection, a proxy 5xx. For update and delete
+                    // that is harmless: both are idempotent against a known
+                    // comment id, so retrying converges.
+                    //
+                    // A create is NOT. The POST may well have landed, and the
+                    // server offers no idempotency key and no client
+                    // correlation field to check against — the contract probe
+                    // in docs/designs/activity-contract/ says so explicitly.
+                    // Auto-retrying posts the user's comment twice. Hold it for
+                    // explicit review instead, the same way VikunjaAPI.send
+                    // refuses to retry mutations and the task drain stops on a
+                    // generic error.
+                    switch op.kind {
+                    case .create:
+                        commentOutbox.markPermanentFailure(
+                            id: op.id,
+                            message: "Not sent. It may already have posted — check the task before retrying."
+                        )
+                    case .update, .delete:
+                        commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+                    }
                 }
-                commentOutbox.acknowledge(id: op.id)
-            } catch let error as VikunjaAPI.APIError where error.isAuthFailure || error.isRateLimited {
-                commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
-            } catch let error as VikunjaAPI.APIError where error.isGone || error.isClient4xx {
-                commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
-            } catch {
-                commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
-            }
             }
         } while commentDrainRequestedWhileDraining && reachability.isOnline
     }
@@ -607,6 +645,7 @@ final class TaskStore {
         commentOutbox = CommentOutbox(accountId: accountId)
         projectExpansion = ProjectExpansion(accountId: accountId)
         loggedProjectCycle = false
+        logCommentOutboxLoadIssue()
         DiagnosticLog.info("outbox replaced")
 
         WidgetCache.clear()

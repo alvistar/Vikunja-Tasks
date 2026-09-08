@@ -59,9 +59,17 @@ enum TaskActivityProjection {
         for overlay in overlays where overlay.state == .deleting {
             if let id = overlay.serverId { deletedServerIds.insert(id) }
         }
-        let overlaysByServerId = Dictionary(uniqueKeysWithValues: overlays.compactMap { overlay in
-            overlay.serverId.map { ($0, overlay) }
-        })
+        // `uniquingKeysWith`, never `uniqueKeysWithValues`: the latter traps on a
+        // duplicate key, and these overlays come from a queue persisted in
+        // UserDefaults. A single duplicated serverId would therefore crash this
+        // task's activity on every launch, forever, with no in-app way out.
+        // CommentOutbox now displaces same-serverId ops so a duplicate should not
+        // arise; this is the belt to that suspenders, because the cost of being
+        // wrong is unrecoverable for the user.
+        let overlaysByServerId = Dictionary(
+            overlays.compactMap { overlay in overlay.serverId.map { ($0, overlay) } },
+            uniquingKeysWith: { _, latest in latest }
+        )
         for comment in comments where !deletedServerIds.contains(comment.id) {
             guard let created = comment.createdDate else { continue }
             let overlay = overlaysByServerId[comment.id]
