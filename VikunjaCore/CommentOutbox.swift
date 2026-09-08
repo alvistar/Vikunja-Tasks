@@ -172,6 +172,20 @@ final class CommentOutbox {
         }
     }
 
+    /// The create landed, but the user edited the text while it was in flight.
+    /// Turn the queued create into an update against the id the server just
+    /// gave us, so the next pass sends the new text rather than posting a
+    /// second comment. Resets the retry budget: this is fresh work.
+    func convertCreateToUpdate(id: UUID, serverId: Int) {
+        guard let index = operations.firstIndex(where: { $0.id == id }),
+              case .create = operations[index].kind else { return }
+        operations[index].kind = .update(serverId: serverId)
+        operations[index].state = .pending
+        operations[index].errorMessage = nil
+        operations[index].attempts = 0
+        persist()
+    }
+
     func remap(taskClientId: UUID, toServerId serverId: Int) {
         for index in operations.indices where operations[index].taskRef == .client(taskClientId) {
             operations[index].taskRef = .server(serverId)
@@ -196,6 +210,17 @@ final class CommentOutbox {
 
     func markPermanentFailure(id: UUID, message: String?) {
         updateState(id: id, state: .permanentlyFailed, message: message)
+    }
+
+    /// A deferral, not a failure: the server asked us to slow down, which says
+    /// nothing about this operation. Leaves `attempts` untouched, or five
+    /// throttles across five polls would permanently fail a perfectly valid
+    /// comment and strand the user's text.
+    func markDeferred(id: UUID) {
+        guard let index = operations.firstIndex(where: { $0.id == id }) else { return }
+        operations[index].state = .pending
+        operations[index].errorMessage = nil
+        persist()
     }
 
     /// Explicit user retry clears the ceiling: they have seen the error and

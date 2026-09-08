@@ -127,6 +127,25 @@ final class TaskStore {
         return outbox.clientId(forPlaceholder: task.id).map(TaskRef.client)
     }
 
+    /// User-facing wording for a policy decision. Kept here rather than in
+    /// `CommentDrainPolicy` so that stays a pure, string-free decision table.
+    private func message(for reason: CommentFailureReason, error: Error) -> String {
+        switch reason {
+        case .ambiguousCreate:
+            return String(
+                localized: "Not sent. It may already have posted — check the task before retrying.",
+                comment: "Shown when a comment request failed with no answer, so it may or may not have been saved"
+            )
+        case .notSupported:
+            return String(
+                localized: "This server doesn’t support comments.",
+                comment: "Shown when the Vikunja server has no v2 comment API"
+            )
+        case .server:
+            return VeyrnError.message(for: error)
+        }
+    }
+
     /// `CommentOutbox` is deliberately Foundation-only so the unit-test bundle
     /// can compile it without the Keychain, so it reports load damage as state
     /// instead of logging. Counts only — never comment text.
@@ -160,76 +179,65 @@ final class TaskStore {
                     switch op.kind {
                     case .create:
                         let created = try await VikunjaAPI.createComment(taskId: taskId, comment: op.text)
-                        // No `await` between the response and this check, and the
-                        // store is @MainActor, so the user's cancel can only have
-                        // landed during the request above — never between here
-                        // and the acknowledge below.
-                        //
-                        // If they cancelled while it was in flight, the comment
-                        // now exists on the server and the local op is gone, so
-                        // acknowledge would match nothing and the "cancelled"
-                        // comment would reappear on the next refresh. Delete it
-                        // so cancel means cancel.
-                        guard commentOutbox.operations.contains(where: { $0.id == op.id }) else {
+                        // The op may have changed while the request was in
+                        // flight. @MainActor means that can only have happened
+                        // during the await, but it does NOT mean this check can
+                        // be a mere existence test: `CommentOutbox.update`
+                        // coalesces an edit by mutating the text in place and
+                        // KEEPING the same id, so `contains(id:)` passes and
+                        // acknowledging would throw the user's edit away while
+                        // the server keeps the pre-edit body.
+                        switch commentOutbox.operations.first(where: { $0.id == op.id }) {
+                        case .none:
+                            // Cancelled mid-flight. The comment exists on the
+                            // server now, so delete it: cancel means cancel.
                             try? await VikunjaAPI.deleteComment(taskId: taskId, commentId: created.id)
-                            continue
+                        case .some(let current) where current.text != op.text:
+                            // Edited mid-flight. The create landed with the old
+                            // text; convert the queued op into an update against
+                            // the id we just learned, so the next pass sends the
+                            // new text instead of posting a second comment.
+                            commentOutbox.convertCreateToUpdate(id: op.id, serverId: created.id)
+                        default:
+                            commentOutbox.acknowledge(id: op.id)
                         }
+                        continue
                     case .update(let commentId):
                         _ = try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
                     case .delete(let commentId):
                         try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
                     }
                     commentOutbox.acknowledge(id: op.id)
-                } catch is VikunjaAPI.V2NotAvailable {
-                    // The server has no v2 comment API. Retrying cannot help, and
-                    // a retryable op would be re-sent every 60 s forever while
-                    // blocking this task's activity refresh.
-                    commentOutbox.markPermanentFailure(
-                        id: op.id,
-                        message: "This server doesn’t support comments."
-                    )
-                } catch let error as VikunjaAPI.APIError where error.isGone {
-                    // A delete whose target is already gone reached the desired
-                    // end state — that is success, not a failure banner. Checked
-                    // before isClient4xx, which subsumes 404.
-                    if case .delete = op.kind {
-                        commentOutbox.acknowledge(id: op.id)
-                    } else {
-                        commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
-                    }
-                } catch let error as VikunjaAPI.APIError where error.isRateLimited {
-                    // "Slow down" applies to every op behind this one too, exactly
-                    // as the task drain treats it. Stop the pass and let the next
-                    // scheduled drain pick up the queue.
-                    commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
-                    commentDrainRequestedWhileDraining = false
-                    return
-                } catch let error as VikunjaAPI.APIError where error.isAuthFailure {
-                    commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
-                } catch let error as VikunjaAPI.APIError where error.isClient4xx {
-                    commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
                 } catch {
-                    // The request failed without an HTTP answer — a timeout, a
-                    // dropped connection, a proxy 5xx. For update and delete
-                    // that is harmless: both are idempotent against a known
-                    // comment id, so retrying converges.
-                    //
-                    // A create is NOT. The POST may well have landed, and the
-                    // server offers no idempotency key and no client
-                    // correlation field to check against — the contract probe
-                    // in docs/designs/activity-contract/ says so explicitly.
-                    // Auto-retrying posts the user's comment twice. Hold it for
-                    // explicit review instead, the same way VikunjaAPI.send
-                    // refuses to retry mutations and the task drain stops on a
-                    // generic error.
-                    switch op.kind {
-                    case .create:
-                        commentOutbox.markPermanentFailure(
-                            id: op.id,
-                            message: "Not sent. It may already have posted — check the task before retrying."
-                        )
-                    case .update, .delete:
+                    // The decision matrix lives in CommentDrainPolicy so it can
+                    // be unit-tested; this only maps the transport error onto
+                    // the policy's vocabulary.
+                    let failure: CommentFailureKind
+                    if error is VikunjaAPI.V2NotAvailable {
+                        failure = .notSupported
+                    } else if let api = error as? VikunjaAPI.APIError {
+                        if api.isGone { failure = .gone }
+                        else if api.isRateLimited { failure = .rateLimited }
+                        else if api.isAuthFailure { failure = .authFailure }
+                        else if api.isClient4xx { failure = .client4xx }
+                        else { failure = .transport }
+                    } else {
+                        failure = .transport
+                    }
+
+                    switch CommentDrainPolicy.outcome(for: failure, kind: op.kind) {
+                    case .acknowledge:
+                        commentOutbox.acknowledge(id: op.id)
+                    case .retryable:
                         commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+                    case .permanent(let reason):
+                        commentOutbox.markPermanentFailure(id: op.id, message: message(for: reason, error: error))
+                    case .stopPass:
+                        // A throttle is a deferral, not this op's fault, so it
+                        // must not consume retry budget.
+                        commentOutbox.markDeferred(id: op.id)
+                        commentDrainRequestedWhileDraining = false
+                        return
                     }
                 }
             }

@@ -37,24 +37,90 @@ final class TaskActivityTests: XCTestCase {
         XCTAssertTrue(outbox.operations.isEmpty)
     }
 
-    /// Pins the crash: two overlays sharing a serverId used to trap
-    /// `Dictionary(uniqueKeysWithValues:)` inside `project()`. Because the
-    /// overlays come from a queue persisted in UserDefaults, that trap was a
-    /// crash on every open of the task, across relaunches, unrecoverable in-app.
+    /// Pins the crash directly. The earlier version of this test built its
+    /// overlays through CommentOutbox, which — now that coalescing is fixed —
+    /// produces ONE overlay, so the duplicate case never reached `project()`
+    /// and the test could not fail. It also passed `comments: []` against a
+    /// dateless task, leaving `items` empty and its assertion vacuous.
+    ///
+    /// Build the duplicate by hand, and give it a real comment to bite on.
     func testDuplicateOverlayServerIdsDoNotTrapTheProjection() {
-        let outbox = CommentOutbox(defaults: freshDefaults(), accountId: UUID())
-        outbox.delete(taskRef: .server(1), serverId: 7, clientCommentId: UUID())
-        outbox.delete(taskRef: .server(1), serverId: 7, clientCommentId: UUID())
+        let raw = formatter.string(from: Date())
+        let ref = TaskRef.server(1)
+        let overlays = [
+            LocalCommentOverlay(id: UUID(), taskRef: ref, text: "", timestamp: .now, serverId: 7, state: .deleting),
+            LocalCommentOverlay(id: UUID(), taskRef: ref, text: "", timestamp: .now, serverId: 7, state: .deleting),
+        ]
+        XCTAssertEqual(overlays.compactMap(\.serverId), [7, 7], "the fixture must really contain a duplicate")
 
-        let overlays = outbox.overlays(for: .server(1))
-        let task = VikunjaTask(id: 1, title: "T", done: false, projectId: 1)
+        let comment = VikunjaComment(
+            id: 7, comment: "server copy", author: VikunjaCommentAuthor(id: 1, name: nil, username: "me"),
+            created: raw, updated: raw
+        )
+        let task = VikunjaTask(id: 1, title: "T", done: false, dueDate: nil, projectId: 1, created: raw, relatedTasks: nil)
 
         // Must not trap.
-        let items = TaskActivityProjection.project(task: task, comments: [], overlays: overlays)
-        XCTAssertTrue(items.allSatisfy { $0.commentId != 7 }, "a queued delete tombstones the comment")
+        let items = TaskActivityProjection.project(task: task, comments: [comment], overlays: overlays)
+
+        XCTAssertFalse(items.isEmpty, "empty items would make the next assertion vacuous")
+        XCTAssertFalse(items.contains { $0.commentId == 7 }, "a queued delete tombstones the comment")
     }
 
-    private func freshDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "VeyrnCoreTests.projection.\(UUID().uuidString)")!
+    /// A queued edit must render the user's text, not the stale server copy.
+    func testUpdateOverlayOverridesTheServerText() {
+        let raw = formatter.string(from: Date())
+        let comment = VikunjaComment(
+            id: 7, comment: "stale server text", author: VikunjaCommentAuthor(id: 1, name: nil, username: "me"),
+            created: raw, updated: raw
+        )
+        let overlay = LocalCommentOverlay(
+            id: UUID(), taskRef: .server(1), text: "my edit", timestamp: Date(), serverId: 7, state: .pending
+        )
+        let task = VikunjaTask(id: 1, title: "T", done: false, dueDate: nil, projectId: 1, created: raw, relatedTasks: nil)
+
+        let items = TaskActivityProjection.project(task: task, comments: [comment], overlays: [overlay])
+        let row = items.first { $0.commentId == 7 }
+
+        XCTAssertEqual(row?.text, "my edit")
+        XCTAssertEqual(row?.localOverlay, overlay)
+    }
+
+    /// An unsent comment is the user-visible core of offline support: it must
+    /// appear in the timeline before it has any server id.
+    func testUnsentCommentIsAppendedAsALocalRow() {
+        let raw = formatter.string(from: Date())
+        let overlay = LocalCommentOverlay(
+            id: UUID(), taskRef: .server(1), text: "not sent yet", timestamp: Date(), serverId: nil, state: .pending
+        )
+        let task = VikunjaTask(id: 1, title: "T", done: false, dueDate: nil, projectId: 1, created: raw, relatedTasks: nil)
+
+        let items = TaskActivityProjection.project(task: task, comments: [], overlays: [overlay])
+        let local = items.first { $0.commentId == nil && $0.isComment }
+
+        XCTAssertEqual(local?.text, "not sent yet")
+        XCTAssertEqual(local?.id, .localComment(overlay.id))
+        XCTAssertEqual(local?.localOverlay, overlay)
+    }
+
+    /// A zero `done_at` is Vikunja's "never", not a completion at year 1.
+    func testZeroDoneAtProducesNoCompletionRow() {
+        let raw = formatter.string(from: Date())
+        let task = VikunjaTask(
+            id: 1, title: "T", done: false, dueDate: nil, projectId: 1,
+            created: raw, doneAt: "0001-01-01T00:00:00Z", relatedTasks: nil
+        )
+        XCTAssertEqual(TaskActivityProjection.project(task: task, comments: []).map(\.kind), [.created])
+    }
+
+    func testDoneTaskProducesACompletionRow() {
+        let raw = formatter.string(from: Date())
+        let task = VikunjaTask(
+            id: 1, title: "T", done: true, dueDate: nil, projectId: 1,
+            created: raw, doneAt: raw, relatedTasks: nil
+        )
+        XCTAssertEqual(
+            Set(TaskActivityProjection.project(task: task, comments: []).map(\.kind)),
+            [.created, .completedTask]
+        )
     }
 }

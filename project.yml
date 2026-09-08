@@ -144,6 +144,8 @@ targets:
         includes:
           - Outbox.swift
           - CommentOutbox.swift
+          - CommentDrainPolicy.swift
+          - AccountKeyPurge.swift
           - TaskActivity.swift
           - TaskMerger.swift
           - VikunjaModels.swift

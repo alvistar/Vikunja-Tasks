@@ -183,17 +183,14 @@ enum VikunjaConfig {
         persist(accts)
 
         TokenStore.deleteToken(for: id)
-        // Purge by prefix rather than by an enumerated list. The list approach
-        // silently rotted the moment the comment outbox was added: its key was
-        // never removed, so a deleted account's unsent comment text stayed in
-        // UserDefaults with no owner left to read or clear it. Anything scoped
-        // to this account id is now covered, including keys added later.
-        //
-        // Deliberately not calling CommentOutbox.persistedKeys here — this file
-        // also compiles into the watch and widget-extension targets, which
-        // exclude the comment sources entirely.
-        for key in UserDefaults.standard.dictionaryRepresentation().keys
-        where key.hasPrefix("vikunja.") && key.contains(id.uuidString) {
+        // The rule lives in AccountKeyPurge so it can be unit-tested; stating it
+        // inline here is how it rotted twice (first an enumerated list that
+        // missed the comment outbox, then a prefix rule that matched only
+        // "vikunja." while the current convention is "veyrn.").
+        for key in AccountKeyPurge.keysToPurge(
+            from: UserDefaults.standard.dictionaryRepresentation().keys,
+            accountId: id
+        ) {
             UserDefaults.standard.removeObject(forKey: key)
         }
         DiagnosticLog.info("account deleted (now \(accts.count))")
