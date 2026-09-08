@@ -108,14 +108,21 @@ struct TaskActivityView: View {
                 }
             }
 
+            // Both, and this one first. These were an if/else, so a load
+            // failure hid the "an update needs attention" banner entirely —
+            // and offline is exactly when BOTH happen, which made the banner
+            // unreachable in its most important case. The user's own unsent
+            // text outranks a stale read.
+            if let ref = taskRef, store.commentOutbox.hasFailure(for: ref) {
+                statusBanner("An update needs attention", action: "Review updates") { store.pendingChangesRequested = true }
+            }
+
             if let loadError {
                 if canRetryLoad {
                     statusBanner(loadError, action: "Retry") { Task { await load(page: 1, append: false) } }
                 } else {
                     Text(loadError).font(.system(size: 13)).foregroundStyle(muted)
                 }
-            } else if let ref = taskRef, store.commentOutbox.hasFailure(for: ref) {
-                statusBanner("An update needs attention", action: "Review updates") { store.pendingChangesRequested = true }
             }
 
             if canComment {
@@ -242,7 +249,7 @@ struct TaskActivityView: View {
                         .foregroundStyle(primary)
                 }
                 Text(timeText(item.timestamp)).font(.system(size: 12)).foregroundStyle(muted)
-                if item.commentId == nil { pendingChip }
+                if item.commentId == nil { stateChip(for: item.localOverlay?.state) }
                 Spacer(minLength: 0)
                 if let target = editableTarget(for: item) {
                     commentMenu(item, target: target)
@@ -271,10 +278,26 @@ struct TaskActivityView: View {
         .padding(.bottom, 18)
     }
 
-    private var pendingChip: some View {
+    /// A comment that has no server id yet is either on its way or stuck. The
+    /// chip used to say "Sending" for both, so a permanently failed comment sat
+    /// there claiming to be in flight forever — and the only other signal, the
+    /// failure banner, was itself being shadowed by a load error.
+    @ViewBuilder
+    private func stateChip(for state: LocalCommentOverlay.State?) -> some View {
+        switch state {
+        case .retryableFailed, .permanentlyFailed:
+            chip("Not sent", tint: .red)
+        case .deleting:
+            chip("Removing", tint: muted)
+        default:
+            chip("Sending", tint: muted)
+        }
+    }
+
+    private func chip(_ text: String, tint: Color) -> some View {
         HStack(spacing: 5) {
-            Circle().fill(muted).frame(width: 5, height: 5)
-            Text("Sending").font(.system(size: 11)).foregroundStyle(muted)
+            Circle().fill(tint).frame(width: 5, height: 5)
+            Text(text).font(.system(size: 11)).foregroundStyle(tint)
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
