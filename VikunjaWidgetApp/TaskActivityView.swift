@@ -14,7 +14,6 @@ struct TaskActivityView: View {
     @State private var canRetryLoad = true
     @State private var isExpanded = false
     @State private var composer = ""
-    @State private var currentUser: VikunjaCurrentUser?
     /// Identifies a comment the user can act on.
     ///
     /// `commentId` is nil while the comment is still queued and has no server
@@ -136,7 +135,10 @@ struct TaskActivityView: View {
             guard task.id > 0 else { return }
             store.refreshServerCapabilities()
             await load(page: 1, append: false)
-            currentUser = try? await VikunjaAPI.fetchCurrentUser()
+            // Cached on the store, per account. Held per-view with `try?` this
+            // was one dropped request away from silently making every comment
+            // look like someone else's.
+            await store.loadCurrentUserIfNeeded()
         }
         // Scoped to THIS task, and to a value that changes on state
         // transitions. Watching the global `operations.count` meant a comment
@@ -320,7 +322,7 @@ struct TaskActivityView: View {
             guard let overlay = item.localOverlay, overlay.state != .deleting else { return nil }
             return CommentTarget(commentId: nil, clientCommentId: overlay.id)
         }
-        guard let commentId = item.commentId, currentUser?.id == item.author?.id else { return nil }
+        guard let commentId = item.commentId, store.currentUser?.id == item.author?.id else { return nil }
         // Reuse the queued op's client id when one exists, so an edit displaces
         // that op rather than racing it. Nil otherwise — see CommentTarget.
         return CommentTarget(commentId: commentId, clientCommentId: item.localOverlay?.id)

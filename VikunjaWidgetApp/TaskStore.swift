@@ -564,6 +564,12 @@ final class TaskStore {
             lastReportedFailure = nil
             Task { await VeyrnTelemetry.probeServerInfoIfNeeded() }
             logRefreshOk(elapsed: DiagnosticLog.elapsed(refreshClock))
+            // NOT inside logRefreshOk: that early-returns under a 10-minute
+            // quiet rule, so on a steady poll with unchanged counts these would
+            // never run. The /info probe may have landed since the last refresh,
+            // and a previously failed identity fetch is repaired here.
+            refreshServerCapabilities()
+            await loadCurrentUserIfNeeded()
         } catch {
             lastRefreshError = error
             let tier: String
@@ -612,8 +618,6 @@ final class TaskStore {
         lastLoggedRefreshSummary = summary
         lastLoggedRefreshAt = Date()
         DiagnosticLog.info("refresh ok: \(summary), \(batch.count) requests, \(elapsed)")
-        // The /info probe may have landed since the last refresh.
-        refreshServerCapabilities()
     }
 
     /// Launch-path refresh: retries with backoff so a network stack that isn't
@@ -742,6 +746,9 @@ final class TaskStore {
         commentOutbox = CommentOutbox(accountId: accountId)
         projectExpansion = ProjectExpansion(accountId: accountId)
         loggedProjectCycle = false
+        // Identity is per-account. Leaving the old one cached would let the
+        // previous account's id decide which comments look editable.
+        currentUser = nil
         logCommentOutboxLoadIssue()
         DiagnosticLog.info("outbox replaced")
 
@@ -1019,6 +1026,28 @@ final class TaskStore {
 
     func refreshServerCapabilities() {
         supportsComments = VikunjaAPI.supportsComments
+    }
+
+    /// The authenticated user's identity, cached for the life of the account.
+    ///
+    /// Vikunja returns no per-comment permission field, so the client decides
+    /// whether a comment is yours by comparing `comment.author.id` against this.
+    /// It used to be fetched per view with `try?` and cached nowhere, so one
+    /// dropped `GET /user` left it nil, every comment failed the ownership test,
+    /// and edit/delete silently disappeared from your own comments until you
+    /// closed and reopened the task.
+    ///
+    /// Cached here instead: one success serves every task for the account, and
+    /// a failure is repaired by the next refresh rather than persisting for the
+    /// life of a view.
+    private(set) var currentUser: VikunjaCurrentUser?
+
+    /// Best-effort and idempotent. Failing to learn who you are must not stop
+    /// the timeline rendering, so the error is swallowed — but unlike before,
+    /// it is retried.
+    func loadCurrentUserIfNeeded() async {
+        guard currentUser == nil, VikunjaAPI.supportsComments else { return }
+        currentUser = try? await VikunjaAPI.fetchCurrentUser()
     }
     private var commentDrainRequestedWhileDraining = false
 
