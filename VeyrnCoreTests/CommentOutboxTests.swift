@@ -248,6 +248,89 @@ final class CommentOutboxTests: XCTestCase {
         XCTAssertTrue(outbox.operations.isEmpty)
     }
 
+    // MARK: - Retry ceiling
+
+    /// Without a ceiling, a 403 on a comment the token may read but not write
+    /// was re-sent on every 60 s poll forever, and the user was never told:
+    /// `hasFailure` reports only `permanentlyFailed`, so no banner ever fired.
+    func testRetryableFailuresBecomePermanentAtTheCeiling() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = CommentOutbox(defaults: defaults, accountId: UUID())
+        let op = outbox.create(taskRef: .server(1), text: "x")
+
+        for attempt in 1..<CommentOutbox.maxRetryAttempts {
+            outbox.markRetryableFailure(id: op.id, message: "boom")
+            XCTAssertEqual(outbox.operations.first?.state, .retryableFailed,
+                           "attempt \(attempt) should still be retryable")
+            XCTAssertFalse(outbox.eligibleOperations().isEmpty)
+        }
+
+        outbox.markRetryableFailure(id: op.id, message: "boom")
+        XCTAssertEqual(outbox.operations.first?.state, .permanentlyFailed)
+        XCTAssertTrue(outbox.eligibleOperations().isEmpty, "a dead op must stop being re-sent")
+        XCTAssertTrue(outbox.hasFailure(for: .server(1)), "and the user must be told")
+    }
+
+    /// An explicit user retry is a different thing from the drain looping.
+    func testUserRetryClearsTheCeiling() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = CommentOutbox(defaults: defaults, accountId: UUID())
+        let op = outbox.create(taskRef: .server(1), text: "x")
+
+        for _ in 0..<CommentOutbox.maxRetryAttempts { outbox.markRetryableFailure(id: op.id, message: "boom") }
+        XCTAssertEqual(outbox.operations.first?.state, .permanentlyFailed)
+
+        outbox.retry(id: op.id)
+        XCTAssertEqual(outbox.operations.first?.state, .pending)
+        XCTAssertEqual(outbox.operations.first?.attemptCount, 0)
+        XCTAssertFalse(outbox.eligibleOperations().isEmpty)
+    }
+
+    /// Records written before `attempts` existed must still decode. A
+    /// non-optional field here would have made every one of them undecodable,
+    /// and the per-record isolation would then have dropped them all.
+    func testRecordsWrittenBeforeTheAttemptsFieldStillDecode() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = UUID()
+        let key = "vikunja.commentOutbox.v1.\(account.uuidString)"
+
+        let seed = CommentOutbox(defaults: defaults, accountId: account)
+        _ = seed.create(taskRef: .server(1), text: "written by an older build")
+
+        var envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(defaults.data(forKey: key))) as? [String: Any]
+        )
+        var records = try XCTUnwrap(envelope["operations"] as? [[String: Any]])
+        records = records.map { var r = $0; r.removeValue(forKey: "attempts"); return r }
+        envelope["operations"] = records
+        defaults.set(try JSONSerialization.data(withJSONObject: envelope), forKey: key)
+
+        let restored = CommentOutbox(defaults: defaults, accountId: account)
+        XCTAssertNil(restored.loadIssue, "an older record must not be treated as malformed")
+        XCTAssertEqual(restored.operations.count, 1)
+        XCTAssertEqual(restored.operations[0].attemptCount, 0)
+    }
+
+    // MARK: - Predicates
+
+    /// `retryableFailed` used to block refresh too, so a comment that failed
+    /// once stopped the task's activity list from ever fetching again — silently,
+    /// because the banner is driven by `hasFailure` (permanent only).
+    func testRetryableFailureDoesNotBlockRefresh() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = CommentOutbox(defaults: defaults, accountId: UUID())
+        let op = outbox.create(taskRef: .server(1), text: "x")
+        XCTAssertTrue(outbox.blocksRefresh(for: .server(1)), "in-flight work still blocks")
+
+        outbox.markRetryableFailure(id: op.id, message: "offline")
+        XCTAssertFalse(outbox.blocksRefresh(for: .server(1)),
+                       "a failed op is not in flight; its overlay already shadows the server copy")
+    }
+
     func testRefreshBlockingAndFailurePredicatesAreScopedAndStateAware() {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

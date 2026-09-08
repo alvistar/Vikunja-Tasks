@@ -73,6 +73,9 @@
     "Active Account" : {
 
     },
+    "Activity" : {
+
+    },
     "Add" : {
 
     },
@@ -85,7 +88,13 @@
     "Add Task" : {
 
     },
+    "Add an update" : {
+
+    },
     "Add subtask…" : {
+
+    },
+    "Add update" : {
 
     },
     "All changes synced" : {
@@ -190,6 +199,18 @@
     "Delete this task?" : {
 
     },
+    "Delete this update?" : {
+
+    },
+    "Delete update" : {
+
+    },
+    "Delete update…" : {
+
+    },
+    "Deleted update" : {
+      "comment" : "Pending Changes row: a queued comment deletion"
+    },
     "Diagnostic Log" : {
 
     },
@@ -221,6 +242,18 @@
 
     },
     "Edit Account" : {
+
+    },
+    "Edit update" : {
+
+    },
+    "Edit your update" : {
+
+    },
+    "Edited update" : {
+      "comment" : "Pending Changes row: a queued edit to a comment"
+    },
+    "Editing your update" : {
 
     },
     "Error" : {
@@ -262,6 +295,9 @@
     "Help" : {
 
     },
+    "Hide activity" : {
+
+    },
     "Import %lld Task%@" : {
       "localizations" : {
         "en" : {
@@ -287,6 +323,12 @@
     "Line 1: project name  ·  Line 2: comma-separated labels (leave blank if none)  ·  Remaining lines: yyyy-mm-dd followed by task title" : {
 
     },
+    "Load earlier activity" : {
+
+    },
+    "Loading activity…" : {
+
+    },
     "Logbook" : {
 
     },
@@ -294,6 +336,9 @@
 
     },
     "Medium" : {
+
+    },
+    "More actions for your update" : {
 
     },
     "More options" : {
@@ -322,6 +367,9 @@
     },
     "No Date" : {
       "comment" : "Section header grouping tasks that have no due date"
+    },
+    "No activity yet. Comments and completed subtasks appear here." : {
+
     },
     "No labels yet" : {
 
@@ -434,6 +482,9 @@
     "Save" : {
 
     },
+    "Save update" : {
+
+    },
     "Scheduled" : {
 
     },
@@ -452,6 +503,9 @@
     "Send Without Log" : {
 
     },
+    "Sending" : {
+
+    },
     "Sends a report to %@. You choose whether to attach the diagnostic log, and you can read it first." : {
 
     },
@@ -464,10 +518,19 @@
     "Share anonymous usage analytics" : {
 
     },
+    "Show %lld activity items" : {
+
+    },
     "Show %lld more of today's tasks" : {
 
     },
     "Show More Tasks" : {
+
+    },
+    "Show less" : {
+
+    },
+    "Show more" : {
 
     },
     "Show the previous tasks" : {
@@ -518,6 +581,9 @@
     "The task will go back to the version on your server. Your change will be lost." : {
 
     },
+    "This removes it for everyone on the task." : {
+
+    },
     "This will also delete ^[%lld sub-project](inflect: true) and all of their tasks. This can't be undone." : {
 
     },
@@ -560,6 +626,9 @@
     },
     "Upcoming tasks from your Veyrn instance." : {
 
+    },
+    "Update" : {
+      "comment" : "Pending Changes row: a queued comment on a task"
     },
     "Veyrn" : {
 

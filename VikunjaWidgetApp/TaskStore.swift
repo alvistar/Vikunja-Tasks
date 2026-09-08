@@ -102,16 +102,29 @@ final class TaskStore {
         Task { await drainCommentOutbox() }
     }
 
-    func queueCommentUpdate(task: VikunjaTask, commentId: Int, text: String) {
-        guard task.id > 0 else { return }
-        commentOutbox.update(taskRef: .server(task.id), serverId: commentId, clientCommentId: UUID(), text: text)
+    /// `clientCommentId` must be the real one from the row's overlay, not a
+    /// fresh UUID. Passing a fresh one made `CommentOutbox`'s create-coalescing
+    /// branch unreachable from the app: editing a comment that had not been
+    /// sent yet appended a second operation instead of amending the first, and
+    /// the branch was only ever exercised by its own unit test.
+    ///
+    /// `commentId` is nil while the comment is still queued and has no server
+    /// id yet — that is precisely the case coalescing exists for.
+    func queueCommentUpdate(task: VikunjaTask, commentId: Int?, clientCommentId: UUID, text: String) {
+        guard let ref = commentTaskRef(for: task) else { return }
+        commentOutbox.update(taskRef: ref, serverId: commentId, clientCommentId: clientCommentId, text: text)
         Task { await drainCommentOutbox() }
     }
 
-    func queueCommentDelete(task: VikunjaTask, commentId: Int) {
-        guard task.id > 0 else { return }
-        commentOutbox.delete(taskRef: .server(task.id), serverId: commentId, clientCommentId: UUID())
+    func queueCommentDelete(task: VikunjaTask, commentId: Int?, clientCommentId: UUID) {
+        guard let ref = commentTaskRef(for: task) else { return }
+        commentOutbox.delete(taskRef: ref, serverId: commentId, clientCommentId: clientCommentId)
         Task { await drainCommentOutbox() }
+    }
+
+    private func commentTaskRef(for task: VikunjaTask) -> TaskRef? {
+        if task.id > 0 { return .server(task.id) }
+        return outbox.clientId(forPlaceholder: task.id).map(TaskRef.client)
     }
 
     /// `CommentOutbox` is deliberately Foundation-only so the unit-test bundle
@@ -146,16 +159,54 @@ final class TaskStore {
                 do {
                     switch op.kind {
                     case .create:
-                        _ = try await VikunjaAPI.createComment(taskId: taskId, comment: op.text)
+                        let created = try await VikunjaAPI.createComment(taskId: taskId, comment: op.text)
+                        // No `await` between the response and this check, and the
+                        // store is @MainActor, so the user's cancel can only have
+                        // landed during the request above — never between here
+                        // and the acknowledge below.
+                        //
+                        // If they cancelled while it was in flight, the comment
+                        // now exists on the server and the local op is gone, so
+                        // acknowledge would match nothing and the "cancelled"
+                        // comment would reappear on the next refresh. Delete it
+                        // so cancel means cancel.
+                        guard commentOutbox.operations.contains(where: { $0.id == op.id }) else {
+                            try? await VikunjaAPI.deleteComment(taskId: taskId, commentId: created.id)
+                            continue
+                        }
                     case .update(let commentId):
                         _ = try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
                     case .delete(let commentId):
                         try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
                     }
                     commentOutbox.acknowledge(id: op.id)
-                } catch let error as VikunjaAPI.APIError where error.isAuthFailure || error.isRateLimited {
+                } catch is VikunjaAPI.V2NotAvailable {
+                    // The server has no v2 comment API. Retrying cannot help, and
+                    // a retryable op would be re-sent every 60 s forever while
+                    // blocking this task's activity refresh.
+                    commentOutbox.markPermanentFailure(
+                        id: op.id,
+                        message: "This server doesn’t support comments."
+                    )
+                } catch let error as VikunjaAPI.APIError where error.isGone {
+                    // A delete whose target is already gone reached the desired
+                    // end state — that is success, not a failure banner. Checked
+                    // before isClient4xx, which subsumes 404.
+                    if case .delete = op.kind {
+                        commentOutbox.acknowledge(id: op.id)
+                    } else {
+                        commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
+                    }
+                } catch let error as VikunjaAPI.APIError where error.isRateLimited {
+                    // "Slow down" applies to every op behind this one too, exactly
+                    // as the task drain treats it. Stop the pass and let the next
+                    // scheduled drain pick up the queue.
                     commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
-                } catch let error as VikunjaAPI.APIError where error.isGone || error.isClient4xx {
+                    commentDrainRequestedWhileDraining = false
+                    return
+                } catch let error as VikunjaAPI.APIError where error.isAuthFailure {
+                    commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+                } catch let error as VikunjaAPI.APIError where error.isClient4xx {
                     commentOutbox.markPermanentFailure(id: op.id, message: VeyrnError.message(for: error))
                 } catch {
                     // The request failed without an HTTP answer — a timeout, a
@@ -1226,6 +1277,42 @@ final class TaskStore {
     /// builds these because it is the only place that can resolve a `TaskRef`
     /// to a task title.
     var pendingChanges: [PendingChange] {
+        // Comment ops count toward `pendingOperationCount` and drive the
+        // toolbar pill and the Activity banner's "Review updates", so they have
+        // to be listed and discardable here too. They were not, which left a
+        // permanently-failed comment showing as "N pending" that no retry and
+        // no discard could ever clear.
+        //
+        // Sorted by queue time so the two queues interleave chronologically.
+        // The task rows alone were already in that order (insertion order), so
+        // nothing about their existing presentation changes.
+        (taskPendingChanges + commentPendingChanges).sorted { $0.queuedAt < $1.queuedAt }
+    }
+
+    private var commentPendingChanges: [PendingChange] {
+        commentOutbox.operations.map { op in
+            let label: String
+            switch op.kind {
+            case .create:
+                label = String(localized: "Update", comment: "Pending Changes row: a queued comment on a task")
+            case .update:
+                label = String(localized: "Edited update", comment: "Pending Changes row: a queued edit to a comment")
+            case .delete:
+                label = String(localized: "Deleted update", comment: "Pending Changes row: a queued comment deletion")
+            }
+            return PendingChange(
+                id: op.id,
+                icon: "text.bubble",
+                kindLabel: label,
+                taskTitle: title(for: op.taskRef),
+                queuedAt: op.timestamp,
+                // Discarding a queued comment drops the text, but never the task.
+                deletesTask: false
+            )
+        }
+    }
+
+    private var taskPendingChanges: [PendingChange] {
         outbox.ops.map { op in
             switch op.kind {
             case .create(let payload, _):
@@ -1324,6 +1411,18 @@ final class TaskStore {
     /// Changes sheet.
     @MainActor
     func discard(opId: UUID) async {
+        // Comment ops share this sheet and this discard handle. Both id spaces
+        // are UUIDs, so a lookup miss in one queue is a hit in the other.
+        if commentOutbox.operations.contains(where: { $0.id == opId }) {
+            guard !isDrainingComments else {
+                DiagnosticLog.info("discard ignored — comment drain in progress")
+                return
+            }
+            commentOutbox.acknowledge(id: opId)
+            DiagnosticLog.info("discarded queued comment op")
+            return
+        }
+
         guard let op = outbox.ops.first(where: { $0.id == opId }) else { return }
         // The drain walks a snapshot and removes ops as they land; mutating the
         // queue underneath it risks cancelling a change already on the wire.
@@ -1353,6 +1452,14 @@ final class TaskStore {
                     if case .client(let u) = childRef, u == uuid { doomed.insert(other.id) }
                 }
             }
+            // The cascade has to reach the comment queue too, for exactly the
+            // reason the comment above gives: `eligibleOperations()` filters out
+            // every `.client` ref, and no remap can ever arrive once the create
+            // that would have produced it is gone. Those comment ops would sit
+            // there forever, counted in the pill, deliverable by nothing.
+            for commentOp in commentOutbox.operations where commentOp.taskRef == .client(uuid) {
+                commentOutbox.acknowledge(id: commentOp.id)
+            }
         }
 
         let discarded = outbox.ops.filter { doomed.contains($0.id) }
@@ -1367,6 +1474,21 @@ final class TaskStore {
             DiagnosticLog.info("discardAll ignored — drain in progress")
             return
         }
+        // Clear queued comments too. Guarding on `outbox.ops.isEmpty` alone made
+        // "Discard All" a no-op whenever the only thing queued was a comment,
+        // so a stuck comment op could not be cleared from anywhere in the app.
+        guard !isDrainingComments else {
+            DiagnosticLog.info("discardAll ignored — comment drain in progress")
+            return
+        }
+        let queuedComments = commentOutbox.operations
+        for commentOp in queuedComments {
+            commentOutbox.acknowledge(id: commentOp.id)
+        }
+        if !queuedComments.isEmpty {
+            DiagnosticLog.info("discard all: \(queuedComments.count) queued comment(s)")
+        }
+
         guard !outbox.ops.isEmpty else { return }
         let summary = pendingDiscardSummary
         await applyDiscard(

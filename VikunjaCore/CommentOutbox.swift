@@ -24,6 +24,14 @@ struct PendingCommentOperation: Codable, Identifiable, Equatable {
     var state: CommentOperationState
     var errorMessage: String?
     let timestamp: Date
+
+    /// Optional on purpose. Synthesized `Decodable` does not fall back to a
+    /// property's default value, so a non-optional field here would make every
+    /// record written before this build undecodable — and the per-record
+    /// isolation in `load()` would then quietly drop them all.
+    var attempts: Int?
+
+    var attemptCount: Int { attempts ?? 0 }
 }
 
 struct LocalCommentOverlay: Identifiable, Equatable {
@@ -171,16 +179,33 @@ final class CommentOutbox {
         persist()
     }
 
+    /// Retries are bounded. Without a ceiling a 403 on someone else's comment,
+    /// or a token that will never regain write scope, is re-sent on every 60 s
+    /// poll forever and the user is never told: `hasFailure` only reports
+    /// `permanentlyFailed`, so no banner ever appears.
+    static let maxRetryAttempts = 5
+
     func markRetryableFailure(id: UUID, message: String?) {
-        updateState(id: id, state: .retryableFailed, message: message)
+        guard let index = operations.firstIndex(where: { $0.id == id }) else { return }
+        let attempts = operations[index].attemptCount + 1
+        operations[index].attempts = attempts
+        operations[index].state = attempts >= Self.maxRetryAttempts ? .permanentlyFailed : .retryableFailed
+        operations[index].errorMessage = message
+        persist()
     }
 
     func markPermanentFailure(id: UUID, message: String?) {
         updateState(id: id, state: .permanentlyFailed, message: message)
     }
 
+    /// Explicit user retry clears the ceiling: they have seen the error and
+    /// chosen to try again, which is a different thing from the drain looping.
     func retry(id: UUID) {
-        updateState(id: id, state: .pending, message: nil)
+        guard let index = operations.firstIndex(where: { $0.id == id }) else { return }
+        operations[index].attempts = 0
+        operations[index].state = .pending
+        operations[index].errorMessage = nil
+        persist()
     }
 
     func acknowledge(id: UUID) {
@@ -223,8 +248,13 @@ final class CommentOutbox {
         }
     }
 
+    /// Only `.pending` blocks. A `.retryableFailed` op is not in flight, and its
+    /// overlay already shadows the server copy in the projection — so blocking on
+    /// it bought nothing and cost everything: the activity list stopped fetching
+    /// for that task, permanently and silently, because the failure banner is
+    /// driven by `hasFailure` (permanent only) and nothing else said why.
     func blocksRefresh(for taskRef: TaskRef) -> Bool {
-        operations.contains { $0.taskRef == taskRef && ($0.state == .pending || $0.state == .retryableFailed) }
+        operations.contains { $0.taskRef == taskRef && $0.state == .pending }
     }
 
     func hasFailure(for taskRef: TaskRef) -> Bool {

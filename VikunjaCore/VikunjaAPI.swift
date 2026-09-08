@@ -894,6 +894,11 @@ enum VikunjaAPI {
     /// `TaskStore` decides whether to coalesce a run of queued creates before
     /// it calls the API. False until the launch's first `/info` probe lands,
     /// which just means an early drain takes the per-task path.
+    /// Comments are a v2-only endpoint. Exposed so the UI can hide the composer
+    /// and the activity feed rather than letting the user write an update that
+    /// can never be delivered on an older server.
+    static var supportsComments: Bool { supportsAPIv2 }
+
     static var supportsBulkTaskCreate: Bool {
         UserDefaults(suiteName: VikunjaConfig.appGroupSuite)?
             .bool(forKey: DiagnosticLog.serverSupportsBulkCreateDefaultsKey) ?? false
@@ -933,7 +938,11 @@ enum VikunjaAPI {
     /// is no v1 equivalent for server-side search, so `TaskStore` catches this
     /// (and any other failure) the same way: fall back to client-side
     /// filtering of what's already loaded.
-    private struct V2NotAvailable: Error {}
+    /// Internal, not private: `TaskStore` must be able to tell "this server has
+    /// no v2 endpoint" from a transient failure. Caught as a retryable error it
+    /// would be re-sent every 60 s forever against a server that can never
+    /// answer, while blocking the task's activity refresh the whole time.
+    struct V2NotAvailable: Error {}
 
     // MARK: - v2 request plumbing
 
@@ -1041,7 +1050,14 @@ enum VikunjaAPI {
 
     static func fetchCommentPage(taskId: Int, page: Int = 1, perPage: Int = 50) async throws -> CommentPage {
         guard supportsAPIv2 else { throw V2NotAvailable() }
-        let path = "/tasks/\(taskId)/comments?per_page=\(perPage)&page=\(page)"
+        // `sort_by=id&order_by=desc` is load-bearing, not a nicety. The server's
+        // default order is ASCENDING (verified 2026-09-08 against Vikunja 2.5.0:
+        // ids came back [7, 18], oldest first). Without this, page 1 is the
+        // OLDEST 50 comments — the collapsed Activity row would show the newest
+        // of the oldest page instead of the task's latest activity, and "Load
+        // earlier activity" would walk toward newer. Only visible past 50
+        // comments on one task, which is why nothing caught it.
+        let path = "/tasks/\(taskId)/comments?per_page=\(perPage)&page=\(page)&sort_by=id&order_by=desc"
         let decoded: V2Page<VikunjaComment> = try await getV2(path, as: V2Page<VikunjaComment>.self)
         return CommentPage(items: decoded.items ?? [], page: decoded.page ?? page, totalPages: max(1, decoded.totalPages ?? 1))
     }

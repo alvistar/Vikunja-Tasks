@@ -13,8 +13,17 @@ struct TaskActivityView: View {
     @State private var isExpanded = false
     @State private var composer = ""
     @State private var currentUser: VikunjaCurrentUser?
-    @State private var editingCommentId: Int?
-    @State private var pendingDelete: Int?
+    /// Identifies a comment the user can act on. `commentId` is nil while the
+    /// comment is still queued and has no server id yet — carrying the
+    /// `clientCommentId` alongside is what lets `CommentOutbox` amend that
+    /// queued create instead of appending a second operation.
+    private struct CommentTarget: Equatable {
+        let commentId: Int?
+        let clientCommentId: UUID
+    }
+
+    @State private var editingTarget: CommentTarget?
+    @State private var pendingDelete: CommentTarget?
     /// Comments the reader has opened past the 4-line clamp. Real comments on
     /// this instance run 125-616 characters (median ~370, about 7 lines at the
     /// editor's 452 pt), so the clamp is the common case, not the exception.
@@ -42,7 +51,13 @@ struct TaskActivityView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // Comments are a v2-only endpoint. On an older server every send would
+        // queue an operation that can never be delivered, so offer nothing to
+        // send rather than accepting text and failing later. Local-only
+        // activity (created / completed) still has value, so the section stays.
+        let canComment = VikunjaAPI.supportsComments
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Activity").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(primary)
                 Spacer()
@@ -75,7 +90,9 @@ struct TaskActivityView: View {
                 statusBanner("An update needs attention", action: "Review updates") { store.pendingChangesRequested = true }
             }
 
-            composerRow
+            if canComment {
+                composerRow
+            }
         }
         .padding(14)
         .background(insetBg)
@@ -95,8 +112,12 @@ struct TaskActivityView: View {
         ) {
             Button("Delete update", role: .destructive) {
                 if let pendingDelete {
-                    if editingCommentId == pendingDelete { cancelEditing() }
-                    store.queueCommentDelete(task: task, commentId: pendingDelete)
+                    if editingTarget == pendingDelete { cancelEditing() }
+                    store.queueCommentDelete(
+                        task: task,
+                        commentId: pendingDelete.commentId,
+                        clientCommentId: pendingDelete.clientCommentId
+                    )
                 }
                 pendingDelete = nil
             }
@@ -164,8 +185,8 @@ struct TaskActivityView: View {
     private func commentBody(_ item: TaskActivityItem) -> some View {
         let card = commentCard(item)
         #if os(iOS)
-        if let commentId = item.commentId, currentUser?.id == item.author?.id {
-            swipeRow(card, item: item, commentId: commentId)
+        if let target = editableTarget(for: item) {
+            swipeRow(card, item: item, target: target)
         } else {
             card
         }
@@ -187,8 +208,8 @@ struct TaskActivityView: View {
                 Text(timeText(item.timestamp)).font(.system(size: 12)).foregroundStyle(muted)
                 if item.commentId == nil { pendingChip }
                 Spacer(minLength: 0)
-                if let commentId = item.commentId, currentUser?.id == item.author?.id {
-                    commentMenu(item, commentId: commentId)
+                if let target = editableTarget(for: item) {
+                    commentMenu(item, target: target)
                 }
             }
             Text(rendered(item.text))
@@ -224,18 +245,34 @@ struct TaskActivityView: View {
         .background(Capsule().fill(hairline))
     }
 
+    /// What the user may act on, and with which identity.
+    ///
+    /// A comment still in the queue is ours by construction — it has no author
+    /// from the server yet, so the `author.id == currentUser.id` test that
+    /// gates server comments would wrongly hide it.
+    private func editableTarget(for item: TaskActivityItem) -> CommentTarget? {
+        if item.commentId == nil {
+            guard let overlay = item.localOverlay, overlay.state != .deleting else { return nil }
+            return CommentTarget(commentId: nil, clientCommentId: overlay.id)
+        }
+        guard let commentId = item.commentId, currentUser?.id == item.author?.id else { return nil }
+        // Reuse the queued op's client id when one exists, so an edit displaces
+        // that op rather than racing it.
+        return CommentTarget(commentId: commentId, clientCommentId: item.localOverlay?.id ?? UUID())
+    }
+
     @ViewBuilder
-    private func commentMenu(_ item: TaskActivityItem, commentId: Int) -> some View {
+    private func commentMenu(_ item: TaskActivityItem, target: CommentTarget) -> some View {
         Menu {
             Button("Edit update") {
                 composer = item.text
-                editingCommentId = commentId
+                editingTarget = target
             }
             Divider()
             // macOS does not tint a destructive menu item, so "Delete update"
             // reads exactly like "Edit update" there. The confirmation, not the
             // colour, is what stops a mis-click deleting a comment.
-            Button("Delete update…", role: .destructive) { pendingDelete = commentId }
+            Button("Delete update…", role: .destructive) { pendingDelete = target }
         } label: {
             // The full 44 pt minimum target. Negative padding to buy the
             // height back does not work: it clips the hit region and the
@@ -267,7 +304,7 @@ struct TaskActivityView: View {
     private func swipeRow<Content: View>(
         _ content: Content,
         item: TaskActivityItem,
-        commentId: Int
+        target: CommentTarget
     ) -> some View {
         let isOpen = swipedItem == item.id
         ZStack(alignment: .trailing) {
@@ -279,11 +316,11 @@ struct TaskActivityView: View {
                     swipeButton("Edit", fill: accent) {
                         closeSwipe()
                         composer = item.text
-                        editingCommentId = commentId
+                        editingTarget = target
                     }
                     swipeButton("Delete", fill: .red) {
                         closeSwipe()
-                        pendingDelete = commentId
+                        pendingDelete = target
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -343,7 +380,7 @@ struct TaskActivityView: View {
     }
 
     private func cancelEditing() {
-        editingCommentId = nil
+        editingTarget = nil
         composer = ""
     }
 
@@ -353,7 +390,7 @@ struct TaskActivityView: View {
             // Without this row nothing says the next send REPLACES an existing
             // update rather than posting a new one, and there is no way back
             // out of edit mode short of clearing the field by hand.
-            if editingCommentId != nil {
+            if editingTarget != nil {
                 HStack(spacing: 8) {
                     // Decorative: SF Symbols auto-labels this "Edit", so
                     // VoiceOver read it out beside the banner text that
@@ -370,17 +407,22 @@ struct TaskActivityView: View {
                 .foregroundStyle(muted)
             }
             HStack(spacing: 8) {
-                TextField(editingCommentId == nil ? "Add an update" : "Edit your update", text: $composer, axis: .vertical)
+                TextField(editingTarget == nil ? "Add an update" : "Edit your update", text: $composer, axis: .vertical)
                     .font(.system(size: 15))
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
-                    .accessibilityLabel(editingCommentId == nil ? "Add an update" : "Edit your update")
+                    .accessibilityLabel(editingTarget == nil ? "Add an update" : "Edit your update")
                 Button {
                     let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
-                    if let editingCommentId {
-                        store.queueCommentUpdate(task: task, commentId: editingCommentId, text: text)
-                        self.editingCommentId = nil
+                    if let editingTarget {
+                        store.queueCommentUpdate(
+                            task: task,
+                            commentId: editingTarget.commentId,
+                            clientCommentId: editingTarget.clientCommentId,
+                            text: text
+                        )
+                        self.editingTarget = nil
                     } else {
                         store.queueComment(task: task, text: text)
                     }
@@ -395,11 +437,11 @@ struct TaskActivityView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
-                .accessibilityLabel(editingCommentId == nil ? "Add update" : "Save update")
+                .accessibilityLabel(editingTarget == nil ? "Add update" : "Save update")
             }
         }
         .padding(10)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(editingCommentId == nil ? hairline : accent.opacity(0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(editingTarget == nil ? hairline : accent.opacity(0.5)))
     }
 
     // MARK: - Text
