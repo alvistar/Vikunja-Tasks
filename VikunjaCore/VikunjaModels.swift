@@ -33,8 +33,7 @@ struct VikunjaTask: Codable {
     }
 
     private static func date(from raw: String?) -> Date? {
-        guard let raw, !raw.hasPrefix("0001") else { return nil }
-        return ISO8601DateFormatter().date(from: raw)
+        VikunjaDate.parse(raw)
     }
 
     var effectiveDueDate: Date? {
@@ -91,14 +90,44 @@ struct VikunjaComment: Codable, Identifiable, Equatable {
     let created: String?
     let updated: String?
 
-    var createdDate: Date? {
-        guard let created, !created.hasPrefix("0001") else { return nil }
-        return ISO8601DateFormatter().date(from: created)
-    }
+    var createdDate: Date? { VikunjaDate.parse(created) }
+    var updatedDate: Date? { VikunjaDate.parse(updated) }
+}
 
-    var updatedDate: Date? {
-        guard let updated, !updated.hasPrefix("0001") else { return nil }
-        return ISO8601DateFormatter().date(from: updated)
+/// Parses the timestamp shapes Vikunja actually emits.
+///
+/// Two hazards, both silent:
+///
+/// 1. The Go backend marshals DB timestamps as RFC3339Nano, so a value can
+///    carry fractional seconds (`2026-09-04T10:17:32.913894+02:00`). A bare
+///    `ISO8601DateFormatter` defaults to `.withInternetDateTime`, which
+///    REJECTS those and returns nil — and `TaskActivityProjection` drops any
+///    comment whose `createdDate` is nil, so an entire activity feed would
+///    render empty while pagination still reported items. Servers that emit
+///    whole seconds (this instance, and every test fixture) hide it completely.
+///
+/// 2. Vikunja writes `0001-01-01T00:00:00Z` for "never" rather than omitting
+///    the field, so the zero date must become nil or a task shows as completed
+///    in year 1 and sorts to the bottom of the timeline forever.
+///
+/// The formatters are cached: they were being allocated per property access,
+/// which is the expensive part and was paid once per comment per render.
+enum VikunjaDate {
+    private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let wholeSeconds: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func parse(_ raw: String?) -> Date? {
+        guard let raw, !raw.hasPrefix("0001") else { return nil }
+        return fractional.date(from: raw) ?? wholeSeconds.date(from: raw)
     }
 }
 

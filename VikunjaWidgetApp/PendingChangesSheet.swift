@@ -11,6 +11,19 @@ struct PendingChange: Identifiable {
     /// True for a queued `.create`: discarding deletes the task outright,
     /// because it exists nowhere but this queue. Drives the harsher confirm.
     let deletesTask: Bool
+    /// A queued comment's text. The sheet is the only place a failed comment
+    /// can be seen at all, and without this the user was asked to discard
+    /// something they could not read.
+    var body: String? = nil
+    /// Why it stopped, shown verbatim. Nil while the op is merely pending.
+    var errorMessage: String? = nil
+    /// True for an op the user can ask to send again. A comment that gave up —
+    /// on the retry ceiling, or as an ambiguous create — is otherwise a dead
+    /// row whose only action is discard.
+    var canRetry: Bool = false
+    /// Discarding a queued comment does not touch the task, so the task-shaped
+    /// warning copy would misdescribe it.
+    var isComment: Bool = false
 }
 
 /// Reached by tapping the toolbar "N pending" pill. Lists what is queued,
@@ -49,7 +62,7 @@ struct PendingChangesSheet: View {
                 }
             }
             .confirmationDialog(
-                changeToDiscard?.deletesTask == true ? "Delete this task?" : "Discard this change?",
+                discardTitle,
                 isPresented: Binding(
                     get: { changeToDiscard != nil },
                     set: { if !$0 { changeToDiscard = nil } }
@@ -72,6 +85,10 @@ struct PendingChangesSheet: View {
                 if let change = changeToDiscard {
                     if change.deletesTask {
                         Text("\"\(change.taskTitle)\" was never uploaded to your server, so discarding it deletes it permanently.")
+                    } else if change.isComment {
+                        // Nothing about the task changes when a queued comment
+                        // is dropped; the task-shaped copy misdescribed it.
+                        Text("Your update won't be posted, and the text will be lost.")
                     } else {
                         Text("The task will go back to the version on your server. Your change will be lost.")
                     }
@@ -121,6 +138,12 @@ struct PendingChangesSheet: View {
         .safeAreaInset(edge: .bottom) { footerButtons }
     }
 
+    private var discardTitle: LocalizedStringKey {
+        guard let change = changeToDiscard else { return "Discard this change?" }
+        if change.deletesTask { return "Delete this task?" }
+        return change.isComment ? "Discard this update?" : "Discard this change?"
+    }
+
     private func row(for change: PendingChange) -> some View {
         HStack(spacing: 12) {
             Image(systemName: change.icon)
@@ -133,6 +156,21 @@ struct PendingChangesSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                // The queued comment itself. This sheet is the only place a
+                // failed one can be seen, and without it the user was asked to
+                // discard text they could not read.
+                if let body = change.body {
+                    Text(body)
+                        .font(.subheadline)
+                        .lineLimit(3)
+                        .padding(.top, 2)
+                }
+                if let errorMessage = change.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                }
                 Text(change.queuedAt.formatted(.relative(presentation: .named)))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -140,9 +178,18 @@ struct PendingChangesSheet: View {
             Spacer(minLength: 8)
             // No swipeActions — macOS has none, and a context menu alone is
             // undiscoverable (AccountListView precedent). Visible button on both.
-            Button("Discard") { changeToDiscard = change }
-                .buttonStyle(.borderless)
-                .disabled(store.isDraining)
+            VStack(alignment: .trailing, spacing: 6) {
+                if change.canRetry {
+                    Button("Retry") {
+                        Task { await store.retryComment(opId: change.id) }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(store.isBusy)
+                }
+                Button("Discard") { changeToDiscard = change }
+                    .buttonStyle(.borderless)
+                    .disabled(store.isBusy)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -150,11 +197,13 @@ struct PendingChangesSheet: View {
     private var footerButtons: some View {
         HStack {
             Button {
-                Task { await store.drainOutbox() }
+                // Both queues. This drained only the task outbox, so the one
+                // control offered for unsticking work never touched a comment.
+                Task { await store.retryAll() }
             } label: {
                 Label("Try Again", systemImage: "arrow.clockwise")
             }
-            .disabled(store.isDraining)
+            .disabled(store.isBusy)
 
             Spacer()
 
@@ -163,7 +212,7 @@ struct PendingChangesSheet: View {
             } label: {
                 Label("Discard All", systemImage: "trash")
             }
-            .disabled(store.isDraining)
+            .disabled(store.isBusy)
         }
         .padding()
         .background(.bar)

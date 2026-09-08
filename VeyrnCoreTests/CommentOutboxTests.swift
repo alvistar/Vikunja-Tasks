@@ -114,13 +114,14 @@ final class CommentOutboxTests: XCTestCase {
                        "the original bytes must survive for recovery")
     }
 
-    /// `VikunjaConfig.deleteAccount` purges every UserDefaults key that starts
-    /// with "vikunja." and contains the account id. It cannot reference this
-    /// type (that file also compiles into the watch and widget targets, which
-    /// exclude the comment sources), so this test guards the invariant that
-    /// purge relies on from the other side of the boundary.
+    /// Runs the REAL purge rule against what this type really writes.
     ///
-    /// Without it, an account deletion left the user's unsent comment text in
+    /// The earlier version restated `hasPrefix("vikunja.")` as a literal in the
+    /// test, so narrowing or typo'ing the actual predicate left it green — and
+    /// the predicate was itself new and untested. `AccountKeyPurge` now owns
+    /// the rule, so the test can call it instead of describing it.
+    ///
+    /// Without this, account deletion left the user's unsent comment text in
     /// UserDefaults forever, with no owner left to read or clear it.
     func testEveryPersistedKeyIsReachableByTheAccountPurgeRule() {
         let (defaults, suite) = makeDefaults()
@@ -139,10 +140,11 @@ final class CommentOutboxTests: XCTestCase {
             .filter { $0.contains(account.uuidString) }
         XCTAssertFalse(written.isEmpty, "nothing was persisted; the test proves nothing")
 
-        for key in written {
-            XCTAssertTrue(key.hasPrefix("vikunja."),
-                          "\(key) escapes the deleteAccount purge prefix")
-        }
+        XCTAssertEqual(
+            Set(AccountKeyPurge.keysToPurge(from: written, accountId: account)),
+            Set(written),
+            "a key this outbox writes escapes the account purge rule"
+        )
         XCTAssertEqual(Set(written), Set(CommentOutbox.persistedKeys(accountId: account)),
                        "persistedKeys must stay an accurate inventory of what is written")
     }
@@ -248,6 +250,42 @@ final class CommentOutboxTests: XCTestCase {
         XCTAssertTrue(outbox.operations.isEmpty)
     }
 
+    // MARK: - overlays(for:)
+
+    /// `overlays(for:)` is the outbox's primary read API — it produces every
+    /// row the user sees — and nothing asserted its state mapping or its
+    /// scoping. Collapsing the whole state switch to `.pending` broke no test.
+    func testOverlayStateMappingAndScoping() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = CommentOutbox(defaults: defaults, accountId: UUID())
+
+        let created = outbox.create(taskRef: .server(1), text: "pending")
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first?.state, .pending)
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first?.id, created.clientCommentId,
+                       "the overlay id is the client comment id, not the op id")
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first?.text, "pending")
+
+        outbox.markRetryableFailure(id: created.id, message: "offline")
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first?.state, .retryableFailed("offline"),
+                       "the error message must reach the row")
+
+        outbox.markPermanentFailure(id: created.id, message: "nope")
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first?.state, .permanentlyFailed("nope"))
+
+        // A delete maps to .deleting regardless of its op state — the row is
+        // tombstoned whether or not the request has failed.
+        let deleteClientId = UUID()
+        outbox.delete(taskRef: .server(1), serverId: 7, clientCommentId: deleteClientId)
+        let deleteOp = try XCTUnwrap(outbox.operations.first { $0.kind == .delete(serverId: 7) })
+        outbox.markPermanentFailure(id: deleteOp.id, message: "403")
+        let deleteOverlay = outbox.overlays(for: .server(1)).first { $0.serverId == 7 }
+        XCTAssertEqual(deleteOverlay?.state, .deleting)
+
+        XCTAssertTrue(outbox.overlays(for: .server(2)).isEmpty,
+                      "overlays must be scoped to the task they were queued against")
+    }
+
     // MARK: - Retry ceiling
 
     /// Without a ceiling, a 403 on a comment the token may read but not write
@@ -298,20 +336,32 @@ final class CommentOutboxTests: XCTestCase {
         let key = "vikunja.commentOutbox.v1.\(account.uuidString)"
 
         let seed = CommentOutbox(defaults: defaults, accountId: account)
-        _ = seed.create(taskRef: .server(1), text: "written by an older build")
+        let op = seed.create(taskRef: .server(1), text: "written by an older build")
+        // Force `attempts` to actually be encoded. It is Optional, and
+        // synthesized Codable uses encodeIfPresent, so on a freshly created op
+        // the key is absent — removing it below would then be a no-op and this
+        // test would round-trip ordinary bytes while appearing to prove
+        // something.
+        seed.markRetryableFailure(id: op.id, message: "boom")
 
         var envelope = try XCTUnwrap(
             JSONSerialization.jsonObject(with: try XCTUnwrap(defaults.data(forKey: key))) as? [String: Any]
         )
         var records = try XCTUnwrap(envelope["operations"] as? [[String: Any]])
-        records = records.map { var r = $0; r.removeValue(forKey: "attempts"); return r }
+        records = try records.map { record in
+            var record = record
+            XCTAssertNotNil(record["attempts"],
+                            "the on-disk key was renamed; this test no longer simulates an old record")
+            record.removeValue(forKey: "attempts")
+            return record
+        }
         envelope["operations"] = records
         defaults.set(try JSONSerialization.data(withJSONObject: envelope), forKey: key)
 
         let restored = CommentOutbox(defaults: defaults, accountId: account)
         XCTAssertNil(restored.loadIssue, "an older record must not be treated as malformed")
         XCTAssertEqual(restored.operations.count, 1)
-        XCTAssertEqual(restored.operations[0].attemptCount, 0)
+        XCTAssertEqual(restored.operations[0].attemptCount, 0, "a missing key must read as zero attempts")
     }
 
     // MARK: - Predicates

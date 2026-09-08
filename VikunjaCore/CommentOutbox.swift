@@ -316,7 +316,16 @@ final class CommentOutbox {
 
         operations = envelope.operations.compactMap(\.value)
         let dropped = envelope.operations.count - operations.count
-        if dropped > 0 { loadIssue = .droppedRecords(dropped) }
+        if dropped > 0 {
+            // Same reasoning as the unreadable branch, which this originally
+            // missed: the first persist() rewrites the key with only the
+            // survivors, so the dropped records — and the user's unsent text in
+            // them — are gone for good. A decoder bug affecting one field shape
+            // lands here, not in the whole-payload branch, so it is if anything
+            // the more likely path.
+            defaults.set(data, forKey: quarantineKey)
+            loadIssue = .droppedRecords(dropped)
+        }
     }
 
     private func persist() {

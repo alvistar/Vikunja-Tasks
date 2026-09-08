@@ -10,16 +10,28 @@ struct TaskActivityView: View {
     @State private var hasEarlierPage = false
     @State private var isLoading = false
     @State private var loadError: String?
+    /// False for a terminal cause, so no Retry button is offered.
+    @State private var canRetryLoad = true
     @State private var isExpanded = false
     @State private var composer = ""
     @State private var currentUser: VikunjaCurrentUser?
-    /// Identifies a comment the user can act on. `commentId` is nil while the
-    /// comment is still queued and has no server id yet — carrying the
-    /// `clientCommentId` alongside is what lets `CommentOutbox` amend that
-    /// queued create instead of appending a second operation.
+    /// Identifies a comment the user can act on.
+    ///
+    /// `commentId` is nil while the comment is still queued and has no server
+    /// id yet — carrying the `clientCommentId` alongside is what lets
+    /// `CommentOutbox` amend that queued create instead of appending a second
+    /// operation.
+    ///
+    /// `clientCommentId` is nil for a server comment with no queued operation —
+    /// there is no client id to reuse, and one is minted at action time.
+    ///
+    /// It must NOT be minted here. `editableTarget(for:)` runs inside `body`,
+    /// once or twice per render, so a `?? UUID()` made two targets for the same
+    /// comment unequal and silently killed `if editingTarget == pendingDelete`.
+    /// Identity has to survive a re-render.
     private struct CommentTarget: Equatable {
         let commentId: Int?
-        let clientCommentId: UUID
+        let clientCommentId: UUID?
     }
 
     @State private var editingTarget: CommentTarget?
@@ -45,6 +57,18 @@ struct TaskActivityView: View {
         return .server(task.id)
     }
 
+    /// Changes when anything about THIS task's queued comments changes: which
+    /// ops exist, their text, or their state. The reload trigger keys off this
+    /// rather than the global `operations.count`, which both over-fired (a
+    /// comment on another task reset this view to page 1) and under-fired (an
+    /// in-place edit, or pending -> failed, leaves the count identical).
+    private var overlayFingerprint: [String] {
+        guard let taskRef else { return [] }
+        return store.commentOutbox.overlays(for: taskRef).map { overlay in
+            "\(overlay.id)|\(overlay.serverId.map(String.init) ?? "-")|\(overlay.text)|\(overlay.state)"
+        }
+    }
+
     private var items: [TaskActivityItem] {
         let overlays = taskRef.map { store.commentOutbox.overlays(for: $0) } ?? []
         return TaskActivityProjection.project(task: task, comments: comments, overlays: overlays)
@@ -55,7 +79,7 @@ struct TaskActivityView: View {
         // queue an operation that can never be delivered, so offer nothing to
         // send rather than accepting text and failing later. Local-only
         // activity (created / completed) still has value, so the section stays.
-        let canComment = VikunjaAPI.supportsComments
+        let canComment = store.supportsComments
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -85,7 +109,11 @@ struct TaskActivityView: View {
             }
 
             if let loadError {
-                statusBanner(loadError, action: "Retry") { Task { await load(page: 1, append: false) } }
+                if canRetryLoad {
+                    statusBanner(loadError, action: "Retry") { Task { await load(page: 1, append: false) } }
+                } else {
+                    Text(loadError).font(.system(size: 13)).foregroundStyle(muted)
+                }
             } else if let ref = taskRef, store.commentOutbox.hasFailure(for: ref) {
                 statusBanner("An update needs attention", action: "Review updates") { store.pendingChangesRequested = true }
             }
@@ -99,10 +127,17 @@ struct TaskActivityView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .task(id: task.id) {
             guard task.id > 0 else { return }
+            store.refreshServerCapabilities()
             await load(page: 1, append: false)
             currentUser = try? await VikunjaAPI.fetchCurrentUser()
         }
-        .onChange(of: store.commentOutbox.operations.count) {
+        // Scoped to THIS task, and to a value that changes on state
+        // transitions. Watching the global `operations.count` meant a comment
+        // queued on any other task reset this view to page 1, throwing away
+        // everything "Load earlier activity" had pulled in — while an in-place
+        // edit or a pending -> failed transition, which leave the count alone,
+        // fired nothing at all.
+        .onChange(of: overlayFingerprint) {
             Task { await load(page: 1, append: false) }
         }
         .confirmationDialog(
@@ -116,7 +151,8 @@ struct TaskActivityView: View {
                     store.queueCommentDelete(
                         task: task,
                         commentId: pendingDelete.commentId,
-                        clientCommentId: pendingDelete.clientCommentId
+                        // Minted here, at action time — never in `body`.
+                        clientCommentId: pendingDelete.clientCommentId ?? UUID()
                     )
                 }
                 pendingDelete = nil
@@ -251,14 +287,20 @@ struct TaskActivityView: View {
     /// from the server yet, so the `author.id == currentUser.id` test that
     /// gates server comments would wrongly hide it.
     private func editableTarget(for item: TaskActivityItem) -> CommentTarget? {
+        // No editing at all on a server that cannot accept comments. Gating
+        // only the composer left Edit reachable from the menu and the swipe
+        // row, which put the user into an edit mode with no field, no Save and
+        // no Cancel — invisible and inescapable.
+        guard store.supportsComments else { return nil }
+
         if item.commentId == nil {
             guard let overlay = item.localOverlay, overlay.state != .deleting else { return nil }
             return CommentTarget(commentId: nil, clientCommentId: overlay.id)
         }
         guard let commentId = item.commentId, currentUser?.id == item.author?.id else { return nil }
         // Reuse the queued op's client id when one exists, so an edit displaces
-        // that op rather than racing it.
-        return CommentTarget(commentId: commentId, clientCommentId: item.localOverlay?.id ?? UUID())
+        // that op rather than racing it. Nil otherwise — see CommentTarget.
+        return CommentTarget(commentId: commentId, clientCommentId: item.localOverlay?.id)
     }
 
     @ViewBuilder
@@ -419,7 +461,7 @@ struct TaskActivityView: View {
                         store.queueCommentUpdate(
                             task: task,
                             commentId: editingTarget.commentId,
-                            clientCommentId: editingTarget.clientCommentId,
+                            clientCommentId: editingTarget.clientCommentId ?? UUID(),
                             text: text
                         )
                         self.editingTarget = nil
@@ -489,8 +531,20 @@ struct TaskActivityView: View {
             self.page = result.page
             hasEarlierPage = result.hasEarlierPage
             loadError = nil
+        } catch is VikunjaAPI.V2NotAvailable {
+            // Terminal, not a blip. Offering "Retry" for a capability the
+            // client already knows is absent is a button that can never work.
+            loadError = String(
+                localized: "This server doesn’t support comments.",
+                comment: "Shown when the Vikunja server has no v2 comment API"
+            )
+            canRetryLoad = false
         } catch {
-            loadError = "Couldn’t load newer activity"
+            DiagnosticLog.warn("comment load failed")
+            loadError = append
+                ? String(localized: "Couldn’t load earlier activity", comment: "Activity paging error")
+                : String(localized: "Couldn’t load newer activity", comment: "Activity refresh error")
+            canRetryLoad = true
         }
     }
 

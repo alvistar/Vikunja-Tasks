@@ -122,6 +122,30 @@ final class TaskStore {
         Task { await drainCommentOutbox() }
     }
 
+    /// Send a given-up comment operation again, at the user's explicit request.
+    ///
+    /// Without this, `retry(id:)` had no caller at all: the retry ceiling and
+    /// the ambiguous-create rule both push operations to `permanentlyFailed`,
+    /// the Activity banner routes the user to the Pending Changes sheet, and
+    /// that sheet only offered Discard. The user's authored text could be
+    /// thrown away and nothing else.
+    func retryComment(opId: UUID) async {
+        guard commentOutbox.operations.contains(where: { $0.id == opId }) else { return }
+        commentOutbox.retry(id: opId)
+        await drainCommentOutbox()
+    }
+
+    /// "Try Again" in the sheet. Drains BOTH queues — it used to call
+    /// `drainOutbox()` only, so a comment was untouched by the one control
+    /// offered for getting stuck work moving.
+    func retryAll() async {
+        for op in commentOutbox.operations where op.state == .permanentlyFailed {
+            commentOutbox.retry(id: op.id)
+        }
+        await drainOutbox()
+        await drainCommentOutbox()
+    }
+
     private func commentTaskRef(for task: VikunjaTask) -> TaskRef? {
         if task.id > 0 { return .server(task.id) }
         return outbox.clientId(forPlaceholder: task.id).map(TaskRef.client)
@@ -170,9 +194,21 @@ final class TaskStore {
         guard reachability.isOnline else { return }
         isDrainingComments = true
         defer { isDrainingComments = false }
+
+        // Address the outbox this drain started with, not whatever
+        // `commentOutbox` points at after an await. `resetPerAccountState`
+        // replaces the instance on an account switch, so a bare
+        // `commentOutbox.acknowledge(...)` after the network call would run
+        // against the NEW account's queue, match nothing, and leave the sent op
+        // sitting `.pending` under the old account's key — reposting the
+        // comment when the user switches back. That is the duplicate-post
+        // hazard the ambiguous-create rule exists to prevent, reached through a
+        // path with no user review at all.
+        let outbox = commentOutbox
+
         repeat {
             commentDrainRequestedWhileDraining = false
-            let snapshot = commentOutbox.eligibleOperations()
+            let snapshot = outbox.eligibleOperations()
             for op in snapshot {
                 guard case .server(let taskId) = op.taskRef else { continue }
                 do {
@@ -187,7 +223,7 @@ final class TaskStore {
                         // KEEPING the same id, so `contains(id:)` passes and
                         // acknowledging would throw the user's edit away while
                         // the server keeps the pre-edit body.
-                        switch commentOutbox.operations.first(where: { $0.id == op.id }) {
+                        switch outbox.operations.first(where: { $0.id == op.id }) {
                         case .none:
                             // Cancelled mid-flight. The comment exists on the
                             // server now, so delete it: cancel means cancel.
@@ -197,9 +233,9 @@ final class TaskStore {
                             // text; convert the queued op into an update against
                             // the id we just learned, so the next pass sends the
                             // new text instead of posting a second comment.
-                            commentOutbox.convertCreateToUpdate(id: op.id, serverId: created.id)
+                            outbox.convertCreateToUpdate(id: op.id, serverId: created.id)
                         default:
-                            commentOutbox.acknowledge(id: op.id)
+                            outbox.acknowledge(id: op.id)
                         }
                         continue
                     case .update(let commentId):
@@ -207,7 +243,7 @@ final class TaskStore {
                     case .delete(let commentId):
                         try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
                     }
-                    commentOutbox.acknowledge(id: op.id)
+                    outbox.acknowledge(id: op.id)
                 } catch {
                     // The decision matrix lives in CommentDrainPolicy so it can
                     // be unit-tested; this only maps the transport error onto
@@ -227,15 +263,15 @@ final class TaskStore {
 
                     switch CommentDrainPolicy.outcome(for: failure, kind: op.kind) {
                     case .acknowledge:
-                        commentOutbox.acknowledge(id: op.id)
+                        outbox.acknowledge(id: op.id)
                     case .retryable:
-                        commentOutbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
+                        outbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
                     case .permanent(let reason):
-                        commentOutbox.markPermanentFailure(id: op.id, message: message(for: reason, error: error))
+                        outbox.markPermanentFailure(id: op.id, message: message(for: reason, error: error))
                     case .stopPass:
                         // A throttle is a deferral, not this op's fault, so it
                         // must not consume retry budget.
-                        commentOutbox.markDeferred(id: op.id)
+                        outbox.markDeferred(id: op.id)
                         commentDrainRequestedWhileDraining = false
                         return
                     }
@@ -576,6 +612,8 @@ final class TaskStore {
         lastLoggedRefreshSummary = summary
         lastLoggedRefreshAt = Date()
         DiagnosticLog.info("refresh ok: \(summary), \(batch.count) requests, \(elapsed)")
+        // The /info probe may have landed since the last refresh.
+        refreshServerCapabilities()
     }
 
     /// Launch-path refresh: retries with backoff so a network stack that isn't
@@ -967,7 +1005,21 @@ final class TaskStore {
     /// walking the queue, so the request can be honored by another pass rather
     /// than thrown away. The drain equivalent of `coalescedRefresh`.
     private var drainRequestedWhileDraining = false
-    private var isDrainingComments = false
+    /// Readable so the Pending Changes sheet can disable its actions while a
+    /// comment drain is running; `discard`/`discardAll` refuse in that window.
+    private(set) var isDrainingComments = false
+
+    /// Observable mirror of `VikunjaAPI.supportsComments`, which is a plain
+    /// UserDefaults read written by the once-per-launch `/info` probe. SwiftUI
+    /// has no dependency on a defaults key, so a view that read the static
+    /// directly kept whatever value it saw on first render — a task editor
+    /// opened before the probe landed hid the composer for its whole life on a
+    /// perfectly capable server.
+    private(set) var supportsComments = VikunjaAPI.supportsComments
+
+    func refreshServerCapabilities() {
+        supportsComments = VikunjaAPI.supportsComments
+    }
     private var commentDrainRequestedWhileDraining = false
 
     /// Upper bound on passes per `drainOutbox()` call. Termination doesn't
@@ -1315,7 +1367,15 @@ final class TaskStore {
                 taskTitle: title(for: op.taskRef),
                 queuedAt: op.timestamp,
                 // Discarding a queued comment drops the text, but never the task.
-                deletesTask: false
+                deletesTask: false,
+                // A delete carries no body worth showing.
+                body: {
+                    if case .delete = op.kind { return nil }
+                    return op.text.isEmpty ? nil : op.text
+                }(),
+                errorMessage: op.errorMessage,
+                canRetry: op.state == .permanentlyFailed || op.state == .retryableFailed,
+                isComment: true
             )
         }
     }
@@ -1370,8 +1430,19 @@ final class TaskStore {
         for op in outbox.ops {
             if case .create = op.kind { creates += 1 } else { others += 1 }
         }
+        // Comment ops are discarded by "Discard All" too, so they have to be
+        // counted or the confirmation reads "This will undo 0 changes" while
+        // the button goes on to drop N queued comments. They never delete a
+        // task, so they are always `others`.
+        others += commentOutbox.operations.count
         return (creates, others)
     }
+
+    /// True while either queue is draining. The sheet disables its destructive
+    /// actions on this: `discard`/`discardAll` refuse during a comment drain,
+    /// and gating only on `isDraining` left the buttons enabled so the tap was
+    /// swallowed with nothing but a log line.
+    var isBusy: Bool { isDraining || isDrainingComments }
 
     /// Human-readable title for a queued op's target task. Searches the live
     /// undone list, then the logbook, by the ref's resolved id. **A miss is
