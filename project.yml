@@ -267,11 +267,11 @@ targets:
       - path: VikunjaCore
         includes:
           - Outbox.swift
-          - CommentOutbox.swift
-          - CommentDrainPolicy.swift
-          - AccountKeyPurge.swift
-          - TaskActivity.swift
-          - TaskActivityModels.swift
+          - Activity/CommentOutbox.swift
+          - Activity/CommentDrainPolicy.swift
+          - Activity/AccountKeyPurge.swift
+          - Activity/TaskActivity.swift
+          - Activity/TaskActivityModels.swift
           - TaskMerger.swift
           - VikunjaModels.swift
     settings:
