@@ -239,37 +239,67 @@ as a fork. It was restructured to behave like a **compile-time plugin**: a
 runtime plugin is impossible on iOS/watchOS, so "plugin" here means the feature
 owns its own files and touches upstream's in as few places as possible.
 
+Installing the plugin is **two folders and a build flag**. Removing those three
+things gives back upstream's tree, and `make uninstalled` proves it.
+
 ### Where the feature lives
 
 | File | Role |
 |---|---|
-| `VikunjaCore/TaskActivityModels.swift` | `VikunjaComment`, `VikunjaCommentAuthor`, `VikunjaCurrentUser`, `VikunjaDate`, `TaskActivityStamps` |
-| `VikunjaCore/TaskActivity.swift` | the projection (takes `stamps:`, not a `VikunjaTask`) |
-| `VikunjaCore/CommentOutbox.swift` | the queue |
-| `VikunjaCore/CommentDrainPolicy.swift` | the failure decision table |
-| `VikunjaCore/AccountKeyPurge.swift` | which defaults keys belong to an account |
-| `VikunjaWidgetApp/VikunjaAPI+Activity.swift` | every comment/user/stamps endpoint |
-| `VikunjaWidgetApp/TaskActivityCompanion.swift` | all mutable feature state, hung off `TaskStore` |
-| `VikunjaWidgetApp/TaskStore+Activity.swift` | the feature's additions to `TaskStore`'s surface |
-| `VikunjaWidgetApp/TaskActivityView.swift` | the timeline and composer |
-| `VikunjaWidgetApp/ActivityPendingChangesSheet.swift` | forked copy of the Pending Changes sheet |
-| `VikunjaWidgetApp/Activity.xcstrings` | the feature's string table |
+| `VikunjaCore/Activity/TaskActivityModels.swift` | `VikunjaComment`, `VikunjaCommentAuthor`, `VikunjaCurrentUser`, `VikunjaDate`, `TaskActivityStamps` |
+| `VikunjaCore/Activity/TaskActivity.swift` | the projection (takes `stamps:`, not a `VikunjaTask`) |
+| `VikunjaCore/Activity/CommentOutbox.swift` | the queue |
+| `VikunjaCore/Activity/CommentDrainPolicy.swift` | the failure decision table |
+| `VikunjaCore/Activity/AccountKeyPurge.swift` | which defaults keys belong to an account |
+| `VikunjaWidgetApp/Activity/VikunjaAPI+Activity.swift` | every comment/user/stamps endpoint |
+| `VikunjaWidgetApp/Activity/TaskActivityCompanion.swift` | all mutable feature state, a singleton observing `TaskStore` |
+| `VikunjaWidgetApp/Activity/TaskStore+Activity.swift` | the feature's additions to `TaskStore`'s surface |
+| `VikunjaWidgetApp/Activity/TaskActivityView.swift` | the timeline and composer |
+| `VikunjaWidgetApp/Activity/PendingChangesSheet.swift` | forked Pending Changes sheet, compiled **in place of** upstream's |
+| `VikunjaWidgetApp/Activity/Activity.xcstrings` | the feature's string table |
+
+xcodegen takes subfolders for target membership, so the two app targets compile
+`VikunjaWidgetApp/Activity/` with no extra `project.yml` line, and the watch
+targets' explicit `includes:` keep ignoring `VikunjaCore/Activity/`.
+
+### The build-time switch
+
+`VEYRN_ACTIVITY`, set in `project.yml`'s project-level `settings.configs` for
+both Debug and Release. Two consequences worth knowing:
+
+- `DEBUG` is spelled out beside it in Debug. xcodegen's own Debug preset writes
+  `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` into that same slot, so a value
+  here **replaces** it, and `$(inherited)` resolves against `Signing.xcconfig`,
+  which does not define it. A bare inherit silently dropped `DEBUG`.
+- The flag reaches the widget and watch targets too. Harmless: neither compiles
+  a file containing an `#if VEYRN_ACTIVITY`.
 
 ### What is left in upstream's files
 
-| File | Drift | What it is |
-|---|---|---|
-| `VikunjaCore/VikunjaAPI.swift` | +4/−4 | four `private` → `internal`: `v2BaseURL`, `supportsAPIv2`, `makeRequest`, `send` |
-| `VikunjaCore/Outbox.swift` | +7 | a feature-agnostic `didRemap` hook (2 functional lines) |
-| `VikunjaWidgetApp/TaskStore.swift` | +3 | `let activity`, `activity.attach(to:)`, `activity.reset(accountId:)` |
-| `VikunjaWidgetApp/AppRoot.swift` | +3/−3 | the sheet swap and two `pendingOperationCount` reads |
-| `VikunjaWidgetApp/InlineTaskEditor.swift` | +1 | placing `TaskActivityView` |
-| `project.yml` | 2 blocks | both appended after upstream's last scheme / last target |
+| File | Drift | What it is | Names the feature? |
+|---|---|---|---|
+| `VikunjaCore/Outbox.swift` | +7 | a feature-agnostic `didRemap` hook (2 functional lines) | no |
+| `VikunjaCore/VikunjaAPI.swift` | +4/−4 | four `private` → `internal`: `v2BaseURL`, `supportsAPIv2`, `makeRequest`, `send` | no |
+| `VikunjaWidgetApp/TaskStore.swift` | +8 | `extraPendingCount` / `pendingOperationCount` (2 generic), plus `attach` inside the `#if` | only inside the `#if` |
+| `VikunjaWidgetApp/AppRoot.swift` | +2/−2 | two `outbox.ops.count` → `pendingOperationCount` | no |
+| `VikunjaWidgetApp/InlineTaskEditor.swift` | +3 | `TaskActivityView` inside the `#if` | only inside the `#if` |
+| **Total** | | **10 neutral lines + 2 inert blocks** | **2 `#if`, 0 `#else`** |
+
+`project.yml` carries the fork's own scheme and test target appended after
+upstream's last ones, the `settings.configs` flag block, and two
+`PendingChangesSheet.swift` `excludes` lines inside upstream blocks — the only
+fork lines in this repo that sit inside something of Scott's.
 
 Down from +645/−19 across nine upstream files, including three of the highest
 churn in the repo.
 
 ### How the companion couples to upstream
+
+`TaskActivityCompanion` is a `@MainActor @Observable` **singleton**. A stored
+property would have to live in `TaskStore.swift`; `TaskStore()` is built exactly
+once (`VikunjaWidgetApp.swift:131`), so the two are the same object either way,
+and `TaskStore+Activity.swift`'s computed `var activity { .shared }` keeps every
+`store.activity.…` call site unchanged.
 
 It **observes** rather than being called:
 
@@ -280,31 +310,68 @@ It **observes** rather than being called:
   task ops have landed and remapped;
 - falling edge of `store.isLoading` → re-read server capabilities, repair a
   failed identity fetch;
+- **replacement** of `store.outbox` → the per-account reset. `resetPerAccountState`
+  swaps that observable `private(set) var`, and `VikunjaConfig.setActive(id:)`
+  has already run (`switchAccount`) — `clearForNoAccounts` has already cleared
+  it — so the companion reads the new account id from `VikunjaConfig` itself and
+  upstream never passes it. `onChange` fires on `willSet`, but the hop runs
+  after the synchronous reset returns and before any later drain, because
+  `switchAccount` yields the actor only at its next `await`; an identity check
+  makes a spurious edge free;
 - `Outbox.didRemap` carries client-id → server-id across, because `remap` and
   `remove` happen in one synchronous step and the change is not observable
   afterwards.
 
-`TaskActivityCompanion.attach()` also drains once at launch — comments persisted
-across a launch must go out even when no task op is ever queued — and sweeps
-comment ops whose parent task create has provably gone.
+`attach()` also installs `store.extraPendingCount`, drains once at launch —
+comments persisted across a launch must go out even when no task op is ever
+queued — and sweeps comment ops whose parent task create has provably gone.
 
 ### The port ritual
 
-`PendingChangesSheet.swift` is a **forked copy**. Upstream's file stays compiled
-and byte-identical, so an API-shaped change over there still breaks this build.
-Visual and copy changes do not. After every merge from upstream:
+`VikunjaWidgetApp/PendingChangesSheet.swift` stays in the repo byte-identical to
+upstream so it merges cleanly, but the two app targets **exclude** it and
+compile `Activity/PendingChangesSheet.swift` under the same type names instead.
+Because upstream's file is no longer compiled, a change over there does not
+break this build by itself. What does break is `TaskStore.pendingChanges`
+building the forked `PendingChange` — so a changed *field* still stops the
+build, while changed layout or wording is invisible until you look. After every
+merge from upstream:
 
 ```bash
 git diff <previous-merge>..main -- VikunjaWidgetApp/PendingChangesSheet.swift
 ```
 
-and port anything non-trivial into `ActivityPendingChangesSheet.swift` by hand.
+and port anything non-trivial by hand.
+
+### Two canaries
+
+Neither runs in an ordinary build.
+
+| Target | What it removes | What it proves |
+|---|---|---|
+| `make vanilla` | the flag | the two `#if` seams still compile against upstream's code |
+| `make uninstalled` | the flag, both `Activity/` folders, and the `excludes` lines | Scott's tree still builds — the claim the fork actually makes |
+
+`vanilla` does **not** produce a feature-free binary: the `Activity/` files are
+still in the target, and in a Debug build their symbols are all still in
+`Veyrn.debug.dylib`. An `nm`/`strings` check against `Veyrn.app/Contents/MacOS/Veyrn`
+proves nothing either way — that executable is a 40 KB stub and Xcode 16 puts
+the app's code in the sibling `.debug.dylib`. Run the check there, after
+`make uninstalled`: `TaskStore` present, every Activity symbol at zero.
+
+`uninstalled` regenerates through `make gen`, never bare `xcodegen generate` —
+xcodegen rewrites all six entitlements files as empty plists, and restoring them
+is what the rest of `gen` is for. It restores the tree on the way out whether
+the build passed or failed, and leaves the products uninstalled, so the next
+ordinary build is a full one.
 
 ### Candidates for narrow upstream PRs
 
 Each stands alone and carries no feature-shaped requirement:
 
 - `Outbox.didRemap` (2 functional lines, generic);
+- `TaskStore.extraPendingCount` / `pendingOperationCount` (2 lines, generic: the
+  pill and the sheet count work tracked outside `outbox`);
 - the four `private` → `internal` relaxations in `VikunjaAPI` (precedent:
   `supportsBulkTaskCreate` already carries a "Not `private`" rationale);
 - the fractional-seconds fix to `VikunjaTask.effectiveDueDate`, which was
