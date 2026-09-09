@@ -111,6 +111,14 @@ extension VikunjaAPI {
         try await activityDelete("/tasks/\(taskId)/comments/\(commentId)")
     }
 
+    /// The timestamps the Activity timeline needs, from the same
+    /// `GET /tasks/{id}` the editor already issues for subtasks — decoded into
+    /// our own shape so `VikunjaTask` never has to carry `created`/`done_at`.
+    static func fetchActivityStamps(taskId: Int) async throws -> TaskActivityStamps {
+        guard supportsAPIv2 else { throw ActivityUnavailable() }
+        return try await activityGet("/tasks/\(taskId)", as: TaskActivityStamps.self)
+    }
+
     static func fetchCurrentUser() async throws -> VikunjaCurrentUser {
         guard supportsAPIv2 else { throw ActivityUnavailable() }
         return try await activityGet("/user", as: VikunjaCurrentUser.self)

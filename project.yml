@@ -273,6 +273,7 @@ targets:
           - CommentDrainPolicy.swift
           - AccountKeyPurge.swift
           - TaskActivity.swift
+          - TaskActivityModels.swift
           - TaskMerger.swift
           - VikunjaModels.swift
     settings:

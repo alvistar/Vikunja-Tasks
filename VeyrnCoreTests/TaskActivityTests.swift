@@ -3,20 +3,40 @@ import XCTest
 final class TaskActivityTests: XCTestCase {
     private let formatter = ISO8601DateFormatter()
 
-    func testProjectsOnlyDirectCompletionAndComments() {
+    /// The projection reads `TaskActivityStamps`, which is decoded straight off
+    /// `GET /tasks/{id}`. Build the fixtures from that JSON rather than a
+    /// memberwise initialiser, so a rename of a wire key fails the test instead
+    /// of silently emptying the timeline in the app.
+    private func stamps(
+        id: Int = 1,
+        created: String? = nil,
+        doneAt: String? = nil,
+        subtasks: [(id: Int, title: String, doneAt: String?)] = []
+    ) throws -> TaskActivityStamps {
+        var dict: [String: Any] = ["id": id]
+        if let created { dict["created"] = created }
+        if let doneAt { dict["done_at"] = doneAt }
+        if !subtasks.isEmpty {
+            dict["related_tasks"] = ["subtask": subtasks.map { sub -> [String: Any] in
+                var s: [String: Any] = ["id": sub.id, "title": sub.title]
+                if let d = sub.doneAt { s["done_at"] = d }
+                return s
+            }]
+        }
+        let data = try JSONSerialization.data(withJSONObject: dict)
+        return try JSONDecoder().decode(TaskActivityStamps.self, from: data)
+    }
+
+    func testProjectsOnlyDirectCompletionAndComments() throws {
         let date = formatter.date(from: "2026-09-04T10:00:00Z")!
         let raw = formatter.string(from: date)
-        let completedChild = VikunjaTask(id: 2, title: "Ship", done: true, dueDate: nil, projectId: 1, created: raw, doneAt: raw, relatedTasks: nil)
-        let task = VikunjaTask(
-            id: 1, title: "Parent", done: false, dueDate: nil, projectId: 1,
-            created: raw, relatedTasks: ["subtask": [completedChild]]
-        )
+        let parent = try stamps(created: raw, subtasks: [(id: 2, title: "Ship", doneAt: raw)])
         let comment = VikunjaComment(
             id: 3, comment: "Sent", author: VikunjaCommentAuthor(id: 1, name: nil, username: "me"),
             created: raw, updated: raw
         )
 
-        let items = TaskActivityProjection.project(task: task, comments: [comment])
+        let items = TaskActivityProjection.project(stamps: parent, comments: [comment])
 
         XCTAssertEqual(items.map(\.kind), [.created, .completedSubtask, .comment])
         XCTAssertFalse(items.contains { $0.text.contains("updated") })
@@ -44,7 +64,7 @@ final class TaskActivityTests: XCTestCase {
     /// dateless task, leaving `items` empty and its assertion vacuous.
     ///
     /// Build the duplicate by hand, and give it a real comment to bite on.
-    func testDuplicateOverlayServerIdsDoNotTrapTheProjection() {
+    func testDuplicateOverlayServerIdsDoNotTrapTheProjection() throws {
         let raw = formatter.string(from: Date())
         let ref = TaskRef.server(1)
         let overlays = [
@@ -57,17 +77,18 @@ final class TaskActivityTests: XCTestCase {
             id: 7, comment: "server copy", author: VikunjaCommentAuthor(id: 1, name: nil, username: "me"),
             created: raw, updated: raw
         )
-        let task = VikunjaTask(id: 1, title: "T", done: false, dueDate: nil, projectId: 1, created: raw, relatedTasks: nil)
 
         // Must not trap.
-        let items = TaskActivityProjection.project(task: task, comments: [comment], overlays: overlays)
+        let items = TaskActivityProjection.project(
+            stamps: try stamps(created: raw), comments: [comment], overlays: overlays
+        )
 
         XCTAssertFalse(items.isEmpty, "empty items would make the next assertion vacuous")
         XCTAssertFalse(items.contains { $0.commentId == 7 }, "a queued delete tombstones the comment")
     }
 
     /// A queued edit must render the user's text, not the stale server copy.
-    func testUpdateOverlayOverridesTheServerText() {
+    func testUpdateOverlayOverridesTheServerText() throws {
         let raw = formatter.string(from: Date())
         let comment = VikunjaComment(
             id: 7, comment: "stale server text", author: VikunjaCommentAuthor(id: 1, name: nil, username: "me"),
@@ -76,9 +97,10 @@ final class TaskActivityTests: XCTestCase {
         let overlay = LocalCommentOverlay(
             id: UUID(), taskRef: .server(1), text: "my edit", timestamp: Date(), serverId: 7, state: .pending
         )
-        let task = VikunjaTask(id: 1, title: "T", done: false, dueDate: nil, projectId: 1, created: raw, relatedTasks: nil)
 
-        let items = TaskActivityProjection.project(task: task, comments: [comment], overlays: [overlay])
+        let items = TaskActivityProjection.project(
+            stamps: try stamps(created: raw), comments: [comment], overlays: [overlay]
+        )
         let row = items.first { $0.commentId == 7 }
 
         XCTAssertEqual(row?.text, "my edit")
@@ -87,14 +109,15 @@ final class TaskActivityTests: XCTestCase {
 
     /// An unsent comment is the user-visible core of offline support: it must
     /// appear in the timeline before it has any server id.
-    func testUnsentCommentIsAppendedAsALocalRow() {
+    func testUnsentCommentIsAppendedAsALocalRow() throws {
         let raw = formatter.string(from: Date())
         let overlay = LocalCommentOverlay(
             id: UUID(), taskRef: .server(1), text: "not sent yet", timestamp: Date(), serverId: nil, state: .pending
         )
-        let task = VikunjaTask(id: 1, title: "T", done: false, dueDate: nil, projectId: 1, created: raw, relatedTasks: nil)
 
-        let items = TaskActivityProjection.project(task: task, comments: [], overlays: [overlay])
+        let items = TaskActivityProjection.project(
+            stamps: try stamps(created: raw), comments: [], overlays: [overlay]
+        )
         let local = items.first { $0.commentId == nil && $0.isComment }
 
         XCTAssertEqual(local?.text, "not sent yet")
@@ -103,24 +126,29 @@ final class TaskActivityTests: XCTestCase {
     }
 
     /// A zero `done_at` is Vikunja's "never", not a completion at year 1.
-    func testZeroDoneAtProducesNoCompletionRow() {
+    func testZeroDoneAtProducesNoCompletionRow() throws {
         let raw = formatter.string(from: Date())
-        let task = VikunjaTask(
-            id: 1, title: "T", done: false, dueDate: nil, projectId: 1,
-            created: raw, doneAt: "0001-01-01T00:00:00Z", relatedTasks: nil
-        )
-        XCTAssertEqual(TaskActivityProjection.project(task: task, comments: []).map(\.kind), [.created])
+        let s = try stamps(created: raw, doneAt: "0001-01-01T00:00:00Z")
+        XCTAssertEqual(TaskActivityProjection.project(stamps: s, comments: []).map(\.kind), [.created])
     }
 
-    func testDoneTaskProducesACompletionRow() {
+    func testDoneTaskProducesACompletionRow() throws {
         let raw = formatter.string(from: Date())
-        let task = VikunjaTask(
-            id: 1, title: "T", done: true, dueDate: nil, projectId: 1,
-            created: raw, doneAt: raw, relatedTasks: nil
-        )
+        let s = try stamps(created: raw, doneAt: raw)
         XCTAssertEqual(
-            Set(TaskActivityProjection.project(task: task, comments: []).map(\.kind)),
+            Set(TaskActivityProjection.project(stamps: s, comments: []).map(\.kind)),
             [.created, .completedTask]
         )
+    }
+
+    /// A task that exists only in the outbox has no server stamps at all; the
+    /// timeline is then the user's own queued text and nothing else.
+    func testNilStampsStillProjectsOverlays() {
+        let overlay = LocalCommentOverlay(
+            id: UUID(), taskRef: .client(UUID()), text: "queued", timestamp: Date(), serverId: nil, state: .pending
+        )
+        let items = TaskActivityProjection.project(stamps: nil, comments: [], overlays: [overlay])
+        XCTAssertEqual(items.map(\.kind), [.comment])
+        XCTAssertEqual(items.first?.text, "queued")
     }
 }

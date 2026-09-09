@@ -51,11 +51,11 @@ final class VikunjaDateTests: XCTestCase {
         XCTAssertNotNil(comment.createdDate, "a fractional timestamp must not empty the feed")
         XCTAssertNil(comment.updatedDate)
 
-        let task = VikunjaTask(
-            id: 1, title: "T", done: true, dueDate: nil, projectId: 1,
-            created: "2026-09-04T10:17:32.5Z", doneAt: "2026-09-04T11:00:00.25Z", relatedTasks: nil
-        )
-        XCTAssertNotNil(task.createdDate)
-        XCTAssertNotNil(task.doneAtDate)
+        let json = """
+        {"id": 1, "created": "2026-09-04T10:17:32.5Z", "done_at": "2026-09-04T11:00:00.25Z"}
+        """
+        let stamps = try JSONDecoder().decode(TaskActivityStamps.self, from: Data(json.utf8))
+        XCTAssertNotNil(stamps.createdDate)
+        XCTAssertNotNil(stamps.doneAtDate)
     }
 }

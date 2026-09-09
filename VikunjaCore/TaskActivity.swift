@@ -30,30 +30,36 @@ struct TaskActivityItem: Identifiable, Equatable {
 }
 
 enum TaskActivityProjection {
+    /// `stamps` is nil until `GET /tasks/{id}` lands (and stays nil for a task
+    /// that exists only in the outbox), in which case the timeline is comments
+    /// and overlays only. That is the correct reading: an unsent task has no
+    /// server-side creation event to show.
     static func project(
-        task: VikunjaTask,
+        stamps: TaskActivityStamps?,
         comments: [VikunjaComment],
         overlays: [LocalCommentOverlay] = []
     ) -> [TaskActivityItem] {
         var items: [TaskActivityItem] = []
-        if let created = task.createdDate {
-            items.append(TaskActivityItem(
-                id: .automatic(.created, task.id), kind: .created, timestamp: created,
-                text: "Task created", author: nil, commentId: nil, localOverlay: nil
-            ))
-        }
-        if let doneAt = task.doneAtDate {
-            items.append(TaskActivityItem(
-                id: .automatic(.completedTask, task.id), kind: .completedTask, timestamp: doneAt,
-                text: "Task completed", author: nil, commentId: nil, localOverlay: nil
-            ))
-        }
-        for subtask in task.subtasks where subtask.id != task.id {
-            guard let doneAt = subtask.doneAtDate else { continue }
-            items.append(TaskActivityItem(
-                id: .automatic(.completedSubtask, subtask.id), kind: .completedSubtask, timestamp: doneAt,
-                text: "Completed \(subtask.title)", author: nil, commentId: nil, localOverlay: nil
-            ))
+        if let stamps {
+            if let created = stamps.createdDate {
+                items.append(TaskActivityItem(
+                    id: .automatic(.created, stamps.id), kind: .created, timestamp: created,
+                    text: "Task created", author: nil, commentId: nil, localOverlay: nil
+                ))
+            }
+            if let doneAt = stamps.doneAtDate {
+                items.append(TaskActivityItem(
+                    id: .automatic(.completedTask, stamps.id), kind: .completedTask, timestamp: doneAt,
+                    text: "Task completed", author: nil, commentId: nil, localOverlay: nil
+                ))
+            }
+            for subtask in stamps.subtasks where subtask.id != stamps.id {
+                guard let doneAt = subtask.doneAtDate else { continue }
+                items.append(TaskActivityItem(
+                    id: .automatic(.completedSubtask, subtask.id), kind: .completedSubtask, timestamp: doneAt,
+                    text: "Completed \(subtask.title)", author: nil, commentId: nil, localOverlay: nil
+                ))
+            }
         }
         var deletedServerIds = Set<Int>()
         for overlay in overlays where overlay.state == .deleting {

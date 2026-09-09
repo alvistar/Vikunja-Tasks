@@ -6,6 +6,10 @@ struct TaskActivityView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var comments: [VikunjaComment] = []
+    /// `created` / `done_at` for this task and its subtasks. Fetched here
+    /// rather than threaded in from `InlineTaskEditor`, so the editor's only
+    /// contact with the feature is the one line that places this view.
+    @State private var stamps: TaskActivityStamps?
     @State private var page = 1
     @State private var hasEarlierPage = false
     @State private var isLoading = false
@@ -70,7 +74,7 @@ struct TaskActivityView: View {
 
     private var items: [TaskActivityItem] {
         let overlays = taskRef.map { store.commentOutbox.overlays(for: $0) } ?? []
-        return TaskActivityProjection.project(task: task, comments: comments, overlays: overlays)
+        return TaskActivityProjection.project(stamps: stamps, comments: comments, overlays: overlays)
     }
 
     var body: some View {
@@ -134,6 +138,8 @@ struct TaskActivityView: View {
         .task(id: task.id) {
             guard task.id > 0 else { return }
             store.refreshServerCapabilities()
+            // Best-effort: a failure costs the automatic rows, not the comments.
+            stamps = try? await VikunjaAPI.fetchActivityStamps(taskId: task.id)
             await load(page: 1, append: false)
             // Cached on the store, per account. Held per-view with `try?` this
             // was one dropped request away from silently making every comment
