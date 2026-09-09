@@ -89,8 +89,15 @@ final class TaskActivityCompanion {
     /// queued, and nothing else would raise `isDraining`.
     func attach(to store: TaskStore) {
         if self.store != nil, self.store !== store {
-            // Only SwiftUI previews build a second store. Re-key onto it rather
-            // than leaving the observers armed on a dead one.
+            // Unreachable today: `TaskStore()` is constructed in exactly one
+            // place (`VikunjaWidgetApp.swift:131`) and no preview builds one.
+            // If a second store ever appears, this re-keys onto it rather than
+            // leaving the observers pointed at a dead one — at the cost of
+            // double-arming them, since each old observer re-arms onto
+            // `self.store` when it next fires. Both duplicates are harmless
+            // (`drain()` collapses a concurrent request, `reset` is guarded by
+            // the outbox identity check), but the log is here so it is not the
+            // first anyone hears of it.
             DiagnosticLog.info("activity companion re-attached to a new store")
         }
         self.store = store
