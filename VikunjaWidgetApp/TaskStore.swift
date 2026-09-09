@@ -1366,50 +1366,6 @@ final class TaskStore {
     /// builds these because it is the only place that can resolve a `TaskRef`
     /// to a task title.
     var pendingChanges: [PendingChange] {
-        // Comment ops count toward `pendingOperationCount` and drive the
-        // toolbar pill and the Activity banner's "Review updates", so they have
-        // to be listed and discardable here too. They were not, which left a
-        // permanently-failed comment showing as "N pending" that no retry and
-        // no discard could ever clear.
-        //
-        // Sorted by queue time so the two queues interleave chronologically.
-        // The task rows alone were already in that order (insertion order), so
-        // nothing about their existing presentation changes.
-        (taskPendingChanges + commentPendingChanges).sorted { $0.queuedAt < $1.queuedAt }
-    }
-
-    private var commentPendingChanges: [PendingChange] {
-        commentOutbox.operations.map { op in
-            let label: String
-            switch op.kind {
-            case .create:
-                label = String(localized: "Update", comment: "Pending Changes row: a queued comment on a task")
-            case .update:
-                label = String(localized: "Edited update", comment: "Pending Changes row: a queued edit to a comment")
-            case .delete:
-                label = String(localized: "Deleted update", comment: "Pending Changes row: a queued comment deletion")
-            }
-            return PendingChange(
-                id: op.id,
-                icon: "text.bubble",
-                kindLabel: label,
-                taskTitle: title(for: op.taskRef),
-                queuedAt: op.timestamp,
-                // Discarding a queued comment drops the text, but never the task.
-                deletesTask: false,
-                // A delete carries no body worth showing.
-                body: {
-                    if case .delete = op.kind { return nil }
-                    return op.text.isEmpty ? nil : op.text
-                }(),
-                errorMessage: op.errorMessage,
-                canRetry: op.state == .permanentlyFailed || op.state == .retryableFailed,
-                isComment: true
-            )
-        }
-    }
-
-    private var taskPendingChanges: [PendingChange] {
         outbox.ops.map { op in
             switch op.kind {
             case .create(let payload, _):
@@ -1459,11 +1415,6 @@ final class TaskStore {
         for op in outbox.ops {
             if case .create = op.kind { creates += 1 } else { others += 1 }
         }
-        // Comment ops are discarded by "Discard All" too, so they have to be
-        // counted or the confirmation reads "This will undo 0 changes" while
-        // the button goes on to drop N queued comments. They never delete a
-        // task, so they are always `others`.
-        others += commentOutbox.operations.count
         return (creates, others)
     }
 
@@ -1519,18 +1470,6 @@ final class TaskStore {
     /// Changes sheet.
     @MainActor
     func discard(opId: UUID) async {
-        // Comment ops share this sheet and this discard handle. Both id spaces
-        // are UUIDs, so a lookup miss in one queue is a hit in the other.
-        if commentOutbox.operations.contains(where: { $0.id == opId }) {
-            guard !isDrainingComments else {
-                DiagnosticLog.info("discard ignored — comment drain in progress")
-                return
-            }
-            commentOutbox.acknowledge(id: opId)
-            DiagnosticLog.info("discarded queued comment op")
-            return
-        }
-
         guard let op = outbox.ops.first(where: { $0.id == opId }) else { return }
         // The drain walks a snapshot and removes ops as they land; mutating the
         // queue underneath it risks cancelling a change already on the wire.
@@ -1560,14 +1499,6 @@ final class TaskStore {
                     if case .client(let u) = childRef, u == uuid { doomed.insert(other.id) }
                 }
             }
-            // The cascade has to reach the comment queue too, for exactly the
-            // reason the comment above gives: `eligibleOperations()` filters out
-            // every `.client` ref, and no remap can ever arrive once the create
-            // that would have produced it is gone. Those comment ops would sit
-            // there forever, counted in the pill, deliverable by nothing.
-            for commentOp in commentOutbox.operations where commentOp.taskRef == .client(uuid) {
-                commentOutbox.acknowledge(id: commentOp.id)
-            }
         }
 
         let discarded = outbox.ops.filter { doomed.contains($0.id) }
@@ -1582,21 +1513,6 @@ final class TaskStore {
             DiagnosticLog.info("discardAll ignored — drain in progress")
             return
         }
-        // Clear queued comments too. Guarding on `outbox.ops.isEmpty` alone made
-        // "Discard All" a no-op whenever the only thing queued was a comment,
-        // so a stuck comment op could not be cleared from anywhere in the app.
-        guard !isDrainingComments else {
-            DiagnosticLog.info("discardAll ignored — comment drain in progress")
-            return
-        }
-        let queuedComments = commentOutbox.operations
-        for commentOp in queuedComments {
-            commentOutbox.acknowledge(id: commentOp.id)
-        }
-        if !queuedComments.isEmpty {
-            DiagnosticLog.info("discard all: \(queuedComments.count) queued comment(s)")
-        }
-
         guard !outbox.ops.isEmpty else { return }
         let summary = pendingDiscardSummary
         await applyDiscard(

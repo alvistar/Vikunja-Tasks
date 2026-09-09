@@ -289,7 +289,7 @@ struct AppRoot: View {
             store.pendingChangesRequested = false
         }
         .sheet(isPresented: $showPendingChanges) {
-            PendingChangesSheet(store: store)
+            ActivityPendingChangesSheet(store: store)
         }
         .environment(store)
     }
