@@ -301,10 +301,20 @@ final class TaskActivityCompanion {
         // comment when the user switches back. That is the duplicate-post
         // hazard the ambiguous-create rule exists to prevent, reached through a
         // path with no user review at all.
-        let outbox = commentOutbox
-
         repeat {
             drainRequestedWhileDraining = false
+            // Re-read once per pass, not once per drain. A pass survives its
+            // own awaits on the instance it started with (that is what the
+            // comment above is about), but the NEXT pass must not: an account
+            // switch during the previous pass replaces `commentOutbox`, and the
+            // drain request that set `drainRequestedWhileDraining` came from
+            // the NEW account. Re-entering on the old queue would send the
+            // previous account's comment text to the new account's host and
+            // token — the reverse of the leak guarded against above, and worse,
+            // because it reaches the wrong server rather than the wrong key.
+            // The old queue is untouched, persisted under its own account key,
+            // and drains when the user switches back.
+            let outbox = commentOutbox
             let snapshot = outbox.eligibleOperations()
             for op in snapshot {
                 guard case .server(let taskId) = op.taskRef else { continue }
