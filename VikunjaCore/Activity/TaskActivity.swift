@@ -79,9 +79,15 @@ enum TaskActivityProjection {
         for comment in comments where !deletedServerIds.contains(comment.id) {
             guard let created = comment.createdDate else { continue }
             let overlay = overlaysByServerId[comment.id]
+            // Only a queued EDIT substitutes text. A failed delete's overlay
+            // reaches here too (it no longer hides the comment) and its text is
+            // "" by construction, which would blank the body of a comment that
+            // is alive and unchanged on the server. The composer refuses empty
+            // text, so an empty overlay is never a real edit.
+            let text = overlay.map { $0.text.isEmpty ? comment.comment : $0.text } ?? comment.comment
             items.append(TaskActivityItem(
                 id: .comment(comment.id), kind: .comment, timestamp: created,
-                text: overlay?.text ?? comment.comment, author: comment.author, commentId: comment.id, localOverlay: overlay
+                text: text, author: comment.author, commentId: comment.id, localOverlay: overlay
             ))
         }
         for overlay in overlays where overlay.serverId == nil && overlay.state != .deleting {

@@ -365,6 +365,21 @@ is what the rest of `gen` is for. It restores the tree on the way out whether
 the build passed or failed, and leaves the products uninstalled, so the next
 ordinary build is a full one.
 
+### Known gaps (review, 2026-09-09)
+
+A review over `main..alvistar/activity-build-flag` found eight defects. Three
+were fixed on `alvistar/activity-comment-fixes` — the drain re-entering on the
+previous account's queue, an edit resurrecting an ambiguous create, and a failed
+delete hiding a comment that is still live. These four are **recorded, not
+fixed**:
+
+| Where | Gap |
+|---|---|
+| `TaskActivityView` reload | Editing after "Load earlier activity" reloads `page: 1, append: false`, discarding the paged-in range. The projection only surfaces an `.update` overlay whose `serverId` is present in `comments`, so on a task with more than one page the queued edit becomes invisible with nothing marking it pending. |
+| `CommentOutbox.update` | Silently no-ops when a delete is already queued for that `serverId` (and when `serverId` is nil with no matching create). The composer has already cleared itself, so the typed edit is dropped with no feedback. Returning a result the view can act on would let it say so. |
+| `CommentDrainPolicy` 401/403 | Mapped to `.retryable`, so an expired or under-scoped token burns the five-attempt budget across ~5 poll cycles and the comment gives up — while the task outbox keeps its ops indefinitely. After re-login each comment needs a manual Retry. `APIError.isAuthFailure`'s own doc says such a write must be kept. |
+| `TaskActivity` automatic rows | "Task created", "Task completed" and "Completed <title>" are hard-coded English — the only user-visible strings in the feature that reach no catalog, because `VikunjaCore/Activity` compiles into the Foundation-only test target. |
+
 ### Candidates for narrow upstream PRs
 
 Each stands alone and carries no feature-shaped requirement:

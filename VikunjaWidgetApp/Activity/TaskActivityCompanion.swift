@@ -374,7 +374,15 @@ final class TaskActivityCompanion {
                     case .retryable:
                         outbox.markRetryableFailure(id: op.id, message: VeyrnError.message(for: error))
                     case .permanent(let reason):
-                        outbox.markPermanentFailure(id: op.id, message: message(for: reason, error: error))
+                        // `.ambiguousCreate` is carried onto the op, not just
+                        // into its message: an edit would otherwise put it back
+                        // in the queue and post a second copy of a comment that
+                        // very likely landed.
+                        outbox.markPermanentFailure(
+                            id: op.id,
+                            message: message(for: reason, error: error),
+                            mayHavePosted: reason == .ambiguousCreate
+                        )
                     case .stopPass:
                         // A throttle is a deferral, not this op's fault, so it
                         // must not consume retry budget.

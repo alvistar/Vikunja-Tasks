@@ -264,7 +264,12 @@ struct TaskActivityView: View {
                         .foregroundStyle(primary)
                 }
                 Text(timeText(item.timestamp)).font(.system(size: 12)).foregroundStyle(muted)
-                if item.commentId == nil { stateChip(for: item.localOverlay?.state) }
+                // Any item with a queued op, not just a local-only one. A
+                // server comment with a failed edit rendered the NEW text with
+                // no marker at all, so an edit that never left the device read
+                // as applied. `stateChip`'s default arm is "Sending", so the
+                // nil case must stay out rather than be passed through.
+                if item.localOverlay != nil { stateChip(for: item.localOverlay?.state) }
                 Spacer(minLength: 0)
                 if let target = editableTarget(for: item) {
                     commentMenu(item, target: target)

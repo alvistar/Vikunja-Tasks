@@ -273,17 +273,74 @@ final class CommentOutboxTests: XCTestCase {
         outbox.markPermanentFailure(id: created.id, message: "nope")
         XCTAssertEqual(outbox.overlays(for: .server(1)).first?.state, .permanentlyFailed("nope"))
 
-        // A delete maps to .deleting regardless of its op state — the row is
-        // tombstoned whether or not the request has failed.
+        // A delete tombstones the row only while it can still succeed.
         let deleteClientId = UUID()
         outbox.delete(taskRef: .server(1), serverId: 7, clientCommentId: deleteClientId)
         let deleteOp = try XCTUnwrap(outbox.operations.first { $0.kind == .delete(serverId: 7) })
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first { $0.serverId == 7 }?.state, .deleting)
+
+        outbox.markRetryableFailure(id: deleteOp.id, message: "offline")
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first { $0.serverId == 7 }?.state, .deleting,
+                       "a delete that will be retried is still on its way")
+
+        // This assertion used to read `.deleting`, on the reasoning that the
+        // row is tombstoned whether or not the request failed. That hid a
+        // comment which is still live on the server for everyone else, with no
+        // way for the user to find out and nothing to act on.
         outbox.markPermanentFailure(id: deleteOp.id, message: "403")
-        let deleteOverlay = outbox.overlays(for: .server(1)).first { $0.serverId == 7 }
-        XCTAssertEqual(deleteOverlay?.state, .deleting)
+        XCTAssertEqual(outbox.overlays(for: .server(1)).first { $0.serverId == 7 }?.state,
+                       .permanentlyFailed("403"),
+                       "a delete that gave up must put the comment back, marked")
 
         XCTAssertTrue(outbox.overlays(for: .server(2)).isEmpty,
                       "overlays must be scoped to the task they were queued against")
+    }
+
+    // MARK: - Ambiguous create
+
+    /// A create that failed with no answer may already be on the server. It
+    /// used to be resurrected by an ordinary edit: `update()` matched the op by
+    /// client id, set it back to `.pending` and cleared the error, so the next
+    /// drain posted a second copy — the duplicate the ambiguous rule exists to
+    /// prevent, reached with no confirmation and the warning still on screen.
+    func testEditingAnAmbiguousCreateKeepsItOutOfTheDrain() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = CommentOutbox(defaults: defaults, accountId: nil)
+        let created = outbox.create(taskRef: .server(1), text: "first")
+        outbox.markPermanentFailure(id: created.id, message: "may have posted", mayHavePosted: true)
+
+        outbox.update(taskRef: .server(1), serverId: nil,
+                      clientCommentId: created.clientCommentId, text: "edited")
+
+        let op = try XCTUnwrap(outbox.operations.first { $0.id == created.id })
+        XCTAssertEqual(op.text, "edited", "the user's edit is kept")
+        XCTAssertEqual(op.state, .permanentlyFailed, "but it must not queue itself again")
+        XCTAssertTrue(outbox.eligibleOperations().isEmpty, "and no drain may pick it up")
+
+        // An explicit retry is the informed act that may send it.
+        outbox.retry(id: created.id)
+        XCTAssertEqual(outbox.eligibleOperations().count, 1)
+        XCTAssertEqual(outbox.eligibleOperations().first?.text, "edited")
+    }
+
+    /// The ordinary case is unchanged: a create that merely failed, with no
+    /// ambiguity, goes back in the queue on an edit — with a fresh budget, as
+    /// `convertCreateToUpdate` and `retry` both do.
+    func testEditingAnOrdinaryFailedCreateRequeuesItWithAFreshBudget() throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = CommentOutbox(defaults: defaults, accountId: nil)
+        let created = outbox.create(taskRef: .server(1), text: "first")
+        for _ in 0..<3 { outbox.markRetryableFailure(id: created.id, message: "offline") }
+
+        outbox.update(taskRef: .server(1), serverId: nil,
+                      clientCommentId: created.clientCommentId, text: "edited")
+
+        let op = try XCTUnwrap(outbox.operations.first { $0.id == created.id })
+        XCTAssertEqual(op.state, .pending)
+        XCTAssertEqual(op.attemptCount, 0, "an edit is fresh work, not a continuation")
+        XCTAssertEqual(outbox.eligibleOperations().count, 1)
     }
 
     // MARK: - Retry ceiling

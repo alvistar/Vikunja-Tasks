@@ -31,6 +31,13 @@ struct PendingCommentOperation: Codable, Identifiable, Equatable {
     /// isolation in `load()` would then quietly drop them all.
     var attempts: Int?
 
+    /// Set when a create failed with no answer, so it may or may not have
+    /// reached the server. Such an op must never re-enter the drain by itself;
+    /// only an explicit, informed Retry may send it a second time.
+    ///
+    /// Optional for the same reason as `attempts`.
+    var mayHavePosted: Bool?
+
     var attemptCount: Int { attempts ?? 0 }
 }
 
@@ -122,8 +129,20 @@ final class CommentOutbox {
     func update(taskRef: TaskRef, serverId: Int?, clientCommentId: UUID, text: String) {
         if let index = operations.firstIndex(where: { $0.clientCommentId == clientCommentId && $0.kind == .create }) {
             operations[index].text = text
+            // An ambiguous create may already be on the server. Editing it
+            // records the text the user wants to end up with, but must NOT put
+            // it back in the drain: doing so posted a second copy of a comment
+            // that had very likely landed, which is exactly what the
+            // ambiguous-create rule exists to prevent — and it was reached by
+            // an ordinary edit, with the "may already have posted" warning
+            // still on screen and no confirmation of any kind.
+            guard operations[index].mayHavePosted != true else { persist(); return }
             operations[index].state = .pending
             operations[index].errorMessage = nil
+            // Fresh work, like `convertCreateToUpdate` and `retry`. Left alone,
+            // an edited create inherited the spent budget and could give up
+            // after a single attempt.
+            operations[index].attempts = 0
         } else if let serverId, !hasQueuedDelete(forServerId: serverId) {
             // Refuse rather than displace when a delete is already queued:
             // replacing it would resurrect a comment the user deleted.
@@ -208,8 +227,13 @@ final class CommentOutbox {
         persist()
     }
 
-    func markPermanentFailure(id: UUID, message: String?) {
+    /// `mayHavePosted` marks the ambiguous case: the request went out and no
+    /// answer came back, so the server may hold this comment already.
+    func markPermanentFailure(id: UUID, message: String?, mayHavePosted: Bool = false) {
         updateState(id: id, state: .permanentlyFailed, message: message)
+        guard mayHavePosted, let index = operations.firstIndex(where: { $0.id == id }) else { return }
+        operations[index].mayHavePosted = true
+        persist()
     }
 
     /// A deferral, not a failure: the server asked us to slow down, which says
@@ -251,8 +275,14 @@ final class CommentOutbox {
             guard op.taskRef == taskRef else { return nil }
             let state: LocalCommentOverlay.State
             switch op.kind {
-            case .delete:
+            case .delete where op.state != .permanentlyFailed:
+                // Still on its way — the comment stays hidden.
                 state = .deleting
+            case .delete:
+                // Gave up. The comment is still live on the server for everyone
+                // else, so hiding it tells the user it is gone when it is not,
+                // with no way to find out and nothing to act on.
+                state = .permanentlyFailed(op.errorMessage)
             default:
                 switch op.state {
                 case .pending: state = .pending
