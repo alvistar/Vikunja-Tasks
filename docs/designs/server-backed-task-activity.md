@@ -380,6 +380,24 @@ fixed**:
 | `CommentDrainPolicy` 401/403 | Mapped to `.retryable`, so an expired or under-scoped token burns the five-attempt budget across ~5 poll cycles and the comment gives up — while the task outbox keeps its ops indefinitely. After re-login each comment needs a manual Retry. `APIError.isAuthFailure`'s own doc says such a write must be kept. |
 | `TaskActivity` automatic rows | "Task created", "Task completed" and "Completed <title>" are hard-coded English — the only user-visible strings in the feature that reach no catalog, because `VikunjaCore/Activity` compiles into the Foundation-only test target. |
 
+### Reachability gap: the Logbook (2026-09-09)
+
+A completed task cannot be opened, so **its timeline cannot be read at all** —
+`LogbookRow` takes only `onReopen`, and `TaskListView.logbookContent` mounts no
+editor, unlike `taskRowOrEditor`'s `onTap: { editingTask = task }`.
+
+This is upstream behavior, not something the feature introduced, but it lands
+squarely on the feature's stated purpose: "what happened while I was away?" is
+most often asked about the task you have just finished. Found by running the
+app, not by reading the diff.
+
+Deliberately **not** fixed here. The change belongs in `TaskListView.swift` and
+`TaskRow.swift` — the upstream files this fork has just reduced to ten
+feature-agnostic lines — and it is a product decision about upstream's own
+behavior (completed tasks become tappable everywhere, not only for Activity).
+It is a candidate for a narrow request to Scott, or for a deliberate fork
+decision taken on its own terms.
+
 ### Candidates for narrow upstream PRs
 
 Each stands alone and carries no feature-shaped requirement:
