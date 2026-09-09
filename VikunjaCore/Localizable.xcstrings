@@ -73,9 +73,6 @@
     "Active Account" : {
 
     },
-    "Activity" : {
-
-    },
     "Add" : {
 
     },
@@ -88,13 +85,7 @@
     "Add Task" : {
 
     },
-    "Add an update" : {
-
-    },
     "Add subtask…" : {
-
-    },
-    "Add update" : {
 
     },
     "All changes synced" : {
@@ -169,12 +160,6 @@
     "Couldn't load tasks" : {
 
     },
-    "Couldn’t load earlier activity" : {
-      "comment" : "Activity paging error"
-    },
-    "Couldn’t load newer activity" : {
-      "comment" : "Activity refresh error"
-    },
     "Create" : {
 
     },
@@ -205,18 +190,6 @@
     "Delete this task?" : {
 
     },
-    "Delete this update?" : {
-
-    },
-    "Delete update" : {
-
-    },
-    "Delete update…" : {
-
-    },
-    "Deleted update" : {
-      "comment" : "Pending Changes row: a queued comment deletion"
-    },
     "Diagnostic Log" : {
 
     },
@@ -235,9 +208,6 @@
     "Discard this change?" : {
 
     },
-    "Discard this update?" : {
-
-    },
     "Done" : {
 
     },
@@ -251,18 +221,6 @@
 
     },
     "Edit Account" : {
-
-    },
-    "Edit update" : {
-
-    },
-    "Edit your update" : {
-
-    },
-    "Edited update" : {
-      "comment" : "Pending Changes row: a queued edit to a comment"
-    },
-    "Editing your update" : {
 
     },
     "Error" : {
@@ -304,9 +262,6 @@
     "Help" : {
 
     },
-    "Hide activity" : {
-
-    },
     "Import %lld Task%@" : {
       "localizations" : {
         "en" : {
@@ -332,12 +287,6 @@
     "Line 1: project name  ·  Line 2: comma-separated labels (leave blank if none)  ·  Remaining lines: yyyy-mm-dd followed by task title" : {
 
     },
-    "Load earlier activity" : {
-
-    },
-    "Loading activity…" : {
-
-    },
     "Logbook" : {
 
     },
@@ -345,9 +294,6 @@
 
     },
     "Medium" : {
-
-    },
-    "More actions for your update" : {
 
     },
     "More options" : {
@@ -377,9 +323,6 @@
     "No Date" : {
       "comment" : "Section header grouping tasks that have no due date"
     },
-    "No activity yet. Comments and completed subtasks appear here." : {
-
-    },
     "No labels yet" : {
 
     },
@@ -391,9 +334,6 @@
     },
     "None" : {
 
-    },
-    "Not sent. It may already have posted — check the task before retrying." : {
-      "comment" : "Shown when a comment request failed with no answer, so it may or may not have been saved"
     },
     "Notes…" : {
 
@@ -485,9 +425,6 @@
     "Report a Bug" : {
 
     },
-    "Retry" : {
-
-    },
     "Review" : {
 
     },
@@ -495,9 +432,6 @@
 
     },
     "Save" : {
-
-    },
-    "Save update" : {
 
     },
     "Scheduled" : {
@@ -518,9 +452,6 @@
     "Send Without Log" : {
 
     },
-    "Sending" : {
-
-    },
     "Sends a report to %@. You choose whether to attach the diagnostic log, and you can read it first." : {
 
     },
@@ -533,19 +464,10 @@
     "Share anonymous usage analytics" : {
 
     },
-    "Show %lld activity items" : {
-
-    },
     "Show %lld more of today's tasks" : {
 
     },
     "Show More Tasks" : {
-
-    },
-    "Show less" : {
-
-    },
-    "Show more" : {
 
     },
     "Show the previous tasks" : {
@@ -596,12 +518,6 @@
     "The task will go back to the version on your server. Your change will be lost." : {
 
     },
-    "This removes it for everyone on the task." : {
-
-    },
-    "This server doesn’t support comments." : {
-      "comment" : "Shown when the Vikunja server has no v2 comment API"
-    },
     "This will also delete ^[%lld sub-project](inflect: true) and all of their tasks. This can't be undone." : {
 
     },
@@ -645,9 +561,6 @@
     "Upcoming tasks from your Veyrn instance." : {
 
     },
-    "Update" : {
-      "comment" : "Pending Changes row: a queued comment on a task"
-    },
     "Veyrn" : {
 
     },
@@ -679,9 +592,6 @@
 
     },
     "Your next tasks at a glance." : {
-
-    },
-    "Your update won't be posted, and the text will be lost." : {
 
     },
     "due" : {

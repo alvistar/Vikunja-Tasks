@@ -90,10 +90,10 @@ struct TaskActivityView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Activity").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(primary)
+                Text(String(localized: "Activity", table: "Activity", comment: "Heading of the task activity section")).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(primary)
                 Spacer()
                 if items.count > 1 {
-                    Button(isExpanded ? "Hide activity" : "Show \(items.count) activity items") {
+                    Button(isExpanded ? String(localized: "Hide activity", table: "Activity") : String(localized: "Show \(items.count) activity items", table: "Activity")) {
                         isExpanded.toggle()
                     }
                     .font(.system(size: 13, weight: .medium))
@@ -103,14 +103,14 @@ struct TaskActivityView: View {
             }
 
             if isLoading && items.isEmpty {
-                Text("Loading activity…").font(.system(size: 13)).foregroundStyle(muted)
+                Text(String(localized: "Loading activity…", table: "Activity")).font(.system(size: 13)).foregroundStyle(muted)
             } else if items.isEmpty {
-                Text("No activity yet. Comments and completed subtasks appear here.")
+                Text(String(localized: "No activity yet. Comments and completed subtasks appear here.", table: "Activity"))
                     .font(.system(size: 13)).foregroundStyle(muted)
             } else {
                 timeline(isExpanded ? items : Array(items.prefix(1)))
                 if isExpanded, hasEarlierPage {
-                    Button("Load earlier activity") { Task { await load(page: page + 1, append: true) } }
+                    Button(String(localized: "Load earlier activity", table: "Activity")) { Task { await load(page: page + 1, append: true) } }
                         .font(.system(size: 13, weight: .medium)).foregroundStyle(accent).buttonStyle(.plain)
                 }
             }
@@ -121,12 +121,12 @@ struct TaskActivityView: View {
             // unreachable in its most important case. The user's own unsent
             // text outranks a stale read.
             if let ref = taskRef, store.activity.commentOutbox.hasFailure(for: ref) {
-                statusBanner("An update needs attention", action: "Review updates") { showPendingChanges = true }
+                statusBanner(String(localized: "An update needs attention", table: "Activity"), action: String(localized: "Review updates", table: "Activity")) { showPendingChanges = true }
             }
 
             if let loadError {
                 if canRetryLoad {
-                    statusBanner(loadError, action: "Retry") { Task { await load(page: 1, append: false) } }
+                    statusBanner(loadError, action: String(localized: "Retry", table: "Activity")) { Task { await load(page: 1, append: false) } }
                 } else {
                     Text(loadError).font(.system(size: 13)).foregroundStyle(muted)
                 }
@@ -163,11 +163,11 @@ struct TaskActivityView: View {
             Task { await load(page: 1, append: false) }
         }
         .confirmationDialog(
-            "Delete this update?",
+            String(localized: "Delete this update?", table: "Activity"),
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete update", role: .destructive) {
+            Button(String(localized: "Delete update", table: "Activity"), role: .destructive) {
                 if let pendingDelete {
                     if editingTarget == pendingDelete { cancelEditing() }
                     store.activity.queueCommentDelete(
@@ -179,9 +179,9 @@ struct TaskActivityView: View {
                 }
                 pendingDelete = nil
             }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
+            Button(String(localized: "Cancel", table: "Activity"), role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("This removes it for everyone on the task.")
+            Text(String(localized: "This removes it for everyone on the task.", table: "Activity"))
         }
     }
 
@@ -259,7 +259,7 @@ struct TaskActivityView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 if let author = item.author {
-                    Text(author.username ?? author.name ?? "Update")
+                    Text(author.username ?? author.name ?? String(localized: "Update", table: "Activity", comment: "Pending Changes row: a queued comment on a task"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(primary)
                 }
@@ -279,12 +279,12 @@ struct TaskActivityView: View {
             // 616-character comment is otherwise taller than every other event
             // in the task put together, and pushes the composer off screen.
             if isClamped, item.text.count > 180 {
-                Button("Show more") { unclamped.insert(item.id) }
+                Button(String(localized: "Show more", table: "Activity")) { unclamped.insert(item.id) }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(accent)
                     .buttonStyle(.plain)
             } else if !isClamped {
-                Button("Show less") { unclamped.remove(item.id) }
+                Button(String(localized: "Show less", table: "Activity")) { unclamped.remove(item.id) }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(accent)
                     .buttonStyle(.plain)
@@ -301,11 +301,11 @@ struct TaskActivityView: View {
     private func stateChip(for state: LocalCommentOverlay.State?) -> some View {
         switch state {
         case .retryableFailed, .permanentlyFailed:
-            chip("Not sent", tint: .red)
+            chip(String(localized: "Not sent", table: "Activity"), tint: .red)
         case .deleting:
-            chip("Removing", tint: muted)
+            chip(String(localized: "Removing", table: "Activity"), tint: muted)
         default:
-            chip("Sending", tint: muted)
+            chip(String(localized: "Sending", table: "Activity"), tint: muted)
         }
     }
 
@@ -344,7 +344,7 @@ struct TaskActivityView: View {
     @ViewBuilder
     private func commentMenu(_ item: TaskActivityItem, target: CommentTarget) -> some View {
         Menu {
-            Button("Edit update") {
+            Button(String(localized: "Edit update", table: "Activity")) {
                 composer = item.text
                 editingTarget = target
             }
@@ -352,7 +352,7 @@ struct TaskActivityView: View {
             // macOS does not tint a destructive menu item, so "Delete update"
             // reads exactly like "Edit update" there. The confirmation, not the
             // colour, is what stops a mis-click deleting a comment.
-            Button("Delete update…", role: .destructive) { pendingDelete = target }
+            Button(String(localized: "Delete update…", table: "Activity"), role: .destructive) { pendingDelete = target }
         } label: {
             // The full 44 pt minimum target. Negative padding to buy the
             // height back does not work: it clips the hit region and the
@@ -366,7 +366,7 @@ struct TaskActivityView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .foregroundStyle(muted)
-        .accessibilityLabel("More actions for your update")
+        .accessibilityLabel(String(localized: "More actions for your update", table: "Activity"))
     }
 
     #if os(iOS)
@@ -393,12 +393,12 @@ struct TaskActivityView: View {
             // every comment and automation could tap a hidden control.
             if isOpen {
                 HStack(spacing: 0) {
-                    swipeButton("Edit", fill: accent) {
+                    swipeButton(String(localized: "Edit", table: "Activity", comment: "Swipe action on a comment"), fill: accent) {
                         closeSwipe()
                         composer = item.text
                         editingTarget = target
                     }
-                    swipeButton("Delete", fill: .red) {
+                    swipeButton(String(localized: "Delete", table: "Activity", comment: "Swipe action on a comment"), fill: .red) {
                         closeSwipe()
                         pendingDelete = target
                     }
@@ -477,9 +477,9 @@ struct TaskActivityView: View {
                     // already says the same thing.
                     Image(systemName: "pencil").font(.system(size: 11))
                         .accessibilityHidden(true)
-                    Text("Editing your update").font(.system(size: 12))
+                    Text(String(localized: "Editing your update", table: "Activity")).font(.system(size: 12))
                     Spacer(minLength: 0)
-                    Button("Cancel", action: cancelEditing)
+                    Button(String(localized: "Cancel", table: "Activity"), action: cancelEditing)
                         .font(.system(size: 12, weight: .medium))
                         .buttonStyle(.plain)
                         .foregroundStyle(accent)
@@ -487,11 +487,11 @@ struct TaskActivityView: View {
                 .foregroundStyle(muted)
             }
             HStack(spacing: 8) {
-                TextField(editingTarget == nil ? "Add an update" : "Edit your update", text: $composer, axis: .vertical)
+                TextField(editingTarget == nil ? String(localized: "Add an update", table: "Activity") : String(localized: "Edit your update", table: "Activity"), text: $composer, axis: .vertical)
                     .font(.system(size: 15))
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
-                    .accessibilityLabel(editingTarget == nil ? "Add an update" : "Edit your update")
+                    .accessibilityLabel(editingTarget == nil ? String(localized: "Add an update", table: "Activity") : String(localized: "Edit your update", table: "Activity"))
                 Button {
                     let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
@@ -517,7 +517,7 @@ struct TaskActivityView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
-                .accessibilityLabel(editingTarget == nil ? "Add update" : "Save update")
+                .accessibilityLabel(editingTarget == nil ? String(localized: "Add update", table: "Activity") : String(localized: "Save update", table: "Activity"))
             }
         }
         .padding(10)
@@ -574,14 +574,15 @@ struct TaskActivityView: View {
             // client already knows is absent is a button that can never work.
             loadError = String(
                 localized: "This server doesn’t support comments.",
+                table: "Activity",
                 comment: "Shown when the Vikunja server has no v2 comment API"
             )
             canRetryLoad = false
         } catch {
             DiagnosticLog.warn("comment load failed")
             loadError = append
-                ? String(localized: "Couldn’t load earlier activity", comment: "Activity paging error")
-                : String(localized: "Couldn’t load newer activity", comment: "Activity refresh error")
+                ? String(localized: "Couldn’t load earlier activity", table: "Activity", comment: "Activity paging error")
+                : String(localized: "Couldn’t load newer activity", table: "Activity", comment: "Activity refresh error")
             canRetryLoad = true
         }
     }
@@ -606,7 +607,7 @@ struct TaskActivityView: View {
         let calendar = Calendar.current
         let time = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
         if calendar.isDateInToday(date) { return time }
-        if calendar.isDateInYesterday(date) { return "Yesterday \(time)" }
+        if calendar.isDateInYesterday(date) { return String(localized: "Yesterday \(time)", table: "Activity", comment: "Timestamp on an activity row, e.g. Yesterday 14:32") }
         let sameYear = calendar.isDate(date, equalTo: Date(), toGranularity: .year)
         let day = (sameYear ? Self.dayFormatter : Self.datedYearFormatter).string(from: date)
         return "\(day) \(time)"

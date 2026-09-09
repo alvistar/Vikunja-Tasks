@@ -85,21 +85,21 @@ struct ActivityPendingChangesSheet: View {
                     // auto-dismiss — yanking the sheet away mid-read is the
                     // disorientation this feature exists to fix.
                     ContentUnavailableView {
-                        Label("All changes synced", systemImage: "checkmark.circle")
+                        Label(String(localized: "All changes synced", table: "Activity"), systemImage: "checkmark.circle")
                     } description: {
-                        Text("Everything on this device has reached your server.")
+                        Text(String(localized: "Everything on this device has reached your server.", table: "Activity"))
                     }
                 } else {
                     changeList
                 }
             }
-            .navigationTitle("Pending Changes")
+            .navigationTitle(String(localized: "Pending Changes", table: "Activity"))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "Done", table: "Activity")) { dismiss() }
                 }
             }
             .confirmationDialog(
@@ -112,38 +112,38 @@ struct ActivityPendingChangesSheet: View {
             ) {
                 if let change = changeToDiscard {
                     if change.deletesTask {
-                        Button("Delete Task", role: .destructive) {
+                        Button(String(localized: "Delete Task", table: "Activity"), role: .destructive) {
                             Task { await store.discardAny(opId: change.id) }
                         }
                     } else {
-                        Button("Discard Change", role: .destructive) {
+                        Button(String(localized: "Discard Change", table: "Activity"), role: .destructive) {
                             Task { await store.discardAny(opId: change.id) }
                         }
                     }
                 }
-                Button("Cancel", role: .cancel) {}
+                Button(String(localized: "Cancel", table: "Activity"), role: .cancel) {}
             } message: {
                 if let change = changeToDiscard {
                     if change.deletesTask {
-                        Text("\"\(change.taskTitle)\" was never uploaded to your server, so discarding it deletes it permanently.")
+                        Text(String(localized: "\"\(change.taskTitle)\" was never uploaded to your server, so discarding it deletes it permanently.", table: "Activity"))
                     } else if change.isComment {
                         // Nothing about the task changes when a queued comment
                         // is dropped; the task-shaped copy misdescribed it.
-                        Text("Your update won't be posted, and the text will be lost.")
+                        Text(String(localized: "Your update won't be posted, and the text will be lost.", table: "Activity"))
                     } else {
-                        Text("The task will go back to the version on your server. Your change will be lost.")
+                        Text(String(localized: "The task will go back to the version on your server. Your change will be lost.", table: "Activity"))
                     }
                 }
             }
             .confirmationDialog(
-                "Discard all pending changes?",
+                String(localized: "Discard all pending changes?", table: "Activity"),
                 isPresented: $showDiscardAll,
                 titleVisibility: .visible
             ) {
-                Button("Discard All", role: .destructive) {
+                Button(String(localized: "Discard All", table: "Activity"), role: .destructive) {
                     Task { await store.discardEverything() }
                 }
-                Button("Cancel", role: .cancel) {}
+                Button(String(localized: "Cancel", table: "Activity"), role: .cancel) {}
             } message: {
                 discardAllMessage
             }
@@ -153,10 +153,10 @@ struct ActivityPendingChangesSheet: View {
         #endif
     }
 
-    private var discardTitle: LocalizedStringKey {
-        guard let change = changeToDiscard else { return "Discard this change?" }
-        if change.deletesTask { return "Delete this task?" }
-        return change.isComment ? "Discard this update?" : "Discard this change?"
+    private var discardTitle: String {
+        guard let change = changeToDiscard else { return String(localized: "Discard this change?", table: "Activity") }
+        if change.deletesTask { return String(localized: "Delete this task?", table: "Activity") }
+        return change.isComment ? String(localized: "Discard this update?", table: "Activity") : String(localized: "Discard this change?", table: "Activity")
     }
 
     // MARK: - List
@@ -218,13 +218,13 @@ struct ActivityPendingChangesSheet: View {
             // undiscoverable (AccountListView precedent). Visible button on both.
             VStack(alignment: .trailing, spacing: 6) {
                 if change.canRetry {
-                    Button("Retry") {
+                    Button(String(localized: "Retry", table: "Activity")) {
                         Task { await store.retryComment(opId: change.id) }
                     }
                     .buttonStyle(.borderless)
                     .disabled(store.isBusy)
                 }
-                Button("Discard") { changeToDiscard = change }
+                Button(String(localized: "Discard", table: "Activity")) { changeToDiscard = change }
                     .buttonStyle(.borderless)
                     .disabled(store.isBusy)
             }
@@ -239,7 +239,7 @@ struct ActivityPendingChangesSheet: View {
                 // control offered for unsticking work never touched a comment.
                 Task { await store.retryAll() }
             } label: {
-                Label("Try Again", systemImage: "arrow.clockwise")
+                Label(String(localized: "Try Again", table: "Activity"), systemImage: "arrow.clockwise")
             }
             .disabled(store.isBusy)
 
@@ -248,7 +248,7 @@ struct ActivityPendingChangesSheet: View {
             Button(role: .destructive) {
                 showDiscardAll = true
             } label: {
-                Label("Discard All", systemImage: "trash")
+                Label(String(localized: "Discard All", table: "Activity"), systemImage: "trash")
             }
             .disabled(store.isBusy)
         }
@@ -271,11 +271,11 @@ struct ActivityPendingChangesSheet: View {
     private var discardAllMessage: some View {
         let summary = store.activityDiscardSummary
         if summary.creates > 0 && summary.others > 0 {
-            Text("This will delete ^[\(summary.creates) new task](inflect: true) and undo ^[\(summary.others) change](inflect: true). This cannot be undone.")
+            Text(String(localized: "This will delete ^[\(summary.creates) new task](inflect: true) and undo ^[\(summary.others) change](inflect: true). This cannot be undone.", table: "Activity"))
         } else if summary.creates > 0 {
-            Text("This will delete ^[\(summary.creates) new task](inflect: true). This cannot be undone.")
+            Text(String(localized: "This will delete ^[\(summary.creates) new task](inflect: true). This cannot be undone.", table: "Activity"))
         } else {
-            Text("This will undo ^[\(summary.others) change](inflect: true). This cannot be undone.")
+            Text(String(localized: "This will undo ^[\(summary.others) change](inflect: true). This cannot be undone.", table: "Activity"))
         }
     }
 }
