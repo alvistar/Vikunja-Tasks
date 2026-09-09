@@ -231,3 +231,81 @@ Approved in the engineering review:
 | Activity composer | `~/.gstack/projects/scottsapps-Vikunja-Tasks/designs/comment-composer-20260904/composer-options.html` | Persistent compact composer | Visible under collapsed preview; never opens a sheet. |
 | Comment actions | `~/.gstack/projects/scottsapps-Vikunja-Tasks/designs/comment-menu-20260904/comment-menu.html` | Overflow plus iOS swipe | Ellipsis remains the discoverable fallback; swipe is only an accelerator. |
 
+
+## Fork Layout Addendum (2026-09-09)
+
+Upstream declined PR #6 as out of scope on 2026-09-08, so this feature lives on
+as a fork. It was restructured to behave like a **compile-time plugin**: a
+runtime plugin is impossible on iOS/watchOS, so "plugin" here means the feature
+owns its own files and touches upstream's in as few places as possible.
+
+### Where the feature lives
+
+| File | Role |
+|---|---|
+| `VikunjaCore/TaskActivityModels.swift` | `VikunjaComment`, `VikunjaCommentAuthor`, `VikunjaCurrentUser`, `VikunjaDate`, `TaskActivityStamps` |
+| `VikunjaCore/TaskActivity.swift` | the projection (takes `stamps:`, not a `VikunjaTask`) |
+| `VikunjaCore/CommentOutbox.swift` | the queue |
+| `VikunjaCore/CommentDrainPolicy.swift` | the failure decision table |
+| `VikunjaCore/AccountKeyPurge.swift` | which defaults keys belong to an account |
+| `VikunjaWidgetApp/VikunjaAPI+Activity.swift` | every comment/user/stamps endpoint |
+| `VikunjaWidgetApp/TaskActivityCompanion.swift` | all mutable feature state, hung off `TaskStore` |
+| `VikunjaWidgetApp/TaskStore+Activity.swift` | the feature's additions to `TaskStore`'s surface |
+| `VikunjaWidgetApp/TaskActivityView.swift` | the timeline and composer |
+| `VikunjaWidgetApp/ActivityPendingChangesSheet.swift` | forked copy of the Pending Changes sheet |
+| `VikunjaWidgetApp/Activity.xcstrings` | the feature's string table |
+
+### What is left in upstream's files
+
+| File | Drift | What it is |
+|---|---|---|
+| `VikunjaCore/VikunjaAPI.swift` | +4/−4 | four `private` → `internal`: `v2BaseURL`, `supportsAPIv2`, `makeRequest`, `send` |
+| `VikunjaCore/Outbox.swift` | +7 | a feature-agnostic `didRemap` hook (2 functional lines) |
+| `VikunjaWidgetApp/TaskStore.swift` | +3 | `let activity`, `activity.attach(to:)`, `activity.reset(accountId:)` |
+| `VikunjaWidgetApp/AppRoot.swift` | +3/−3 | the sheet swap and two `pendingOperationCount` reads |
+| `VikunjaWidgetApp/InlineTaskEditor.swift` | +1 | placing `TaskActivityView` |
+| `project.yml` | 2 blocks | both appended after upstream's last scheme / last target |
+
+Down from +645/−19 across nine upstream files, including three of the highest
+churn in the repo.
+
+### How the companion couples to upstream
+
+It **observes** rather than being called:
+
+- falling edge of `store.isDraining` → drain the comment queue. `drainOutbox()`
+  raises `isDraining` before it checks whether the queue is empty, so every
+  drain (poll, reachability, scene activation, "Try Again") produces the edge
+  even with nothing queued — and the comment pass necessarily runs *after* the
+  task ops have landed and remapped;
+- falling edge of `store.isLoading` → re-read server capabilities, repair a
+  failed identity fetch;
+- `Outbox.didRemap` carries client-id → server-id across, because `remap` and
+  `remove` happen in one synchronous step and the change is not observable
+  afterwards.
+
+`TaskActivityCompanion.attach()` also drains once at launch — comments persisted
+across a launch must go out even when no task op is ever queued — and sweeps
+comment ops whose parent task create has provably gone.
+
+### The port ritual
+
+`PendingChangesSheet.swift` is a **forked copy**. Upstream's file stays compiled
+and byte-identical, so an API-shaped change over there still breaks this build.
+Visual and copy changes do not. After every merge from upstream:
+
+```bash
+git diff <previous-merge>..main -- VikunjaWidgetApp/PendingChangesSheet.swift
+```
+
+and port anything non-trivial into `ActivityPendingChangesSheet.swift` by hand.
+
+### Candidates for narrow upstream PRs
+
+Each stands alone and carries no feature-shaped requirement:
+
+- `Outbox.didRemap` (2 functional lines, generic);
+- the four `private` → `internal` relaxations in `VikunjaAPI` (precedent:
+  `supportsBulkTaskCreate` already carries a "Not `private`" rationale);
+- the fractional-seconds fix to `VikunjaTask.effectiveDueDate`, which was
+  reverted here because it was never part of this feature.
