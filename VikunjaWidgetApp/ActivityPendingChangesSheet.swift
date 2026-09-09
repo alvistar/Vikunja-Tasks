@@ -258,6 +258,13 @@ struct ActivityPendingChangesSheet: View {
 
     // MARK: - Copy
 
+    /// These three MUST stay `Text(_:tableName:)` — i.e. a LocalizedStringKey,
+    /// not `Text(String(localized:table:))`. Automatic grammar agreement
+    /// (`^[…](inflect: true)`) is applied on the LocalizedStringKey path only;
+    /// through `String(localized:)` the markup reaches the screen verbatim, as
+    /// "This will undo ^[1 change](inflect: true)". Verified on the simulator
+    /// 2026-09-09 — it renders, it does not crash, and no test would catch it.
+    ///
     /// "This will delete 3 new tasks and undo 17 changes. This cannot be undone."
     /// — with a zero half dropped entirely.
     ///
@@ -271,11 +278,11 @@ struct ActivityPendingChangesSheet: View {
     private var discardAllMessage: some View {
         let summary = store.activityDiscardSummary
         if summary.creates > 0 && summary.others > 0 {
-            Text(String(localized: "This will delete ^[\(summary.creates) new task](inflect: true) and undo ^[\(summary.others) change](inflect: true). This cannot be undone.", table: "Activity"))
+            Text("This will delete ^[\(summary.creates) new task](inflect: true) and undo ^[\(summary.others) change](inflect: true). This cannot be undone.", tableName: "Activity")
         } else if summary.creates > 0 {
-            Text(String(localized: "This will delete ^[\(summary.creates) new task](inflect: true). This cannot be undone.", table: "Activity"))
+            Text("This will delete ^[\(summary.creates) new task](inflect: true). This cannot be undone.", tableName: "Activity")
         } else {
-            Text(String(localized: "This will undo ^[\(summary.others) change](inflect: true). This cannot be undone.", table: "Activity"))
+            Text("This will undo ^[\(summary.others) change](inflect: true). This cannot be undone.", tableName: "Activity")
         }
     }
 }
