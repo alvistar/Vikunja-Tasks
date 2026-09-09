@@ -104,8 +104,9 @@ uninstalled:
 	trap 'mv "$$tmp/app" VikunjaWidgetApp/Activity 2>/dev/null; \
 	      mv "$$tmp/core" VikunjaCore/Activity 2>/dev/null; \
 	      mv "$$tmp/project.yml" project.yml 2>/dev/null; \
-	      rm -rf "$$tmp"; $(MAKE) gen >/dev/null; \
-	      echo "✓ plugin restored"' EXIT; \
+	      $(MAKE) gen >/dev/null; \
+	      if rmdir "$$tmp" 2>/dev/null; then echo "✓ plugin restored"; \
+	      else echo "✗ RESTORE INCOMPLETE — your files are in $$tmp"; exit 1; fi' EXIT; \
 	cp project.yml "$$tmp/project.yml"; \
 	mv VikunjaWidgetApp/Activity "$$tmp/app"; \
 	mv VikunjaCore/Activity "$$tmp/core"; \
