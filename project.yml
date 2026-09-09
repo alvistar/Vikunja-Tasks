@@ -39,8 +39,6 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets:
-        - VeyrnCoreTests
     profile:
       config: Release
     analyze:
@@ -73,6 +71,18 @@ schemes:
       config: Debug
     archive:
       config: Release
+
+  # ── Fork addition (Activity plugin) ──────────────────────────────────────
+  # Its own scheme rather than an edit to VikunjaWidgetApp's test action, so
+  # every fork-only line in this file sits in one contiguous block.
+  VeyrnCoreTests:
+    build:
+      targets:
+        VeyrnCoreTests: [test]
+    test:
+      config: Debug
+      targets:
+        - VeyrnCoreTests
 
 targets:
   # ── macOS ────────────────────────────────────────────────────────────────
@@ -134,24 +144,6 @@ targets:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
       - sdk: AppIntents.framework
-
-  VeyrnCoreTests:
-    type: bundle.unit-test
-    platform: macOS
-    sources:
-      - path: VeyrnCoreTests
-      - path: VikunjaCore
-        includes:
-          - Outbox.swift
-          - CommentOutbox.swift
-          - CommentDrainPolicy.swift
-          - AccountKeyPurge.swift
-          - TaskActivity.swift
-          - TaskMerger.swift
-          - VikunjaModels.swift
-    settings:
-      GENERATE_INFOPLIST_FILE: YES
-      MACOSX_DEPLOYMENT_TARGET: "14.0"
 
   # ── iOS ──────────────────────────────────────────────────────────────────
 
@@ -267,3 +259,22 @@ targets:
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
+
+  # ── Fork addition (Activity plugin) ──────────────────────────────────────
+  VeyrnCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: VeyrnCoreTests
+      - path: VikunjaCore
+        includes:
+          - Outbox.swift
+          - CommentOutbox.swift
+          - CommentDrainPolicy.swift
+          - AccountKeyPurge.swift
+          - TaskActivity.swift
+          - TaskMerger.swift
+          - VikunjaModels.swift
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
