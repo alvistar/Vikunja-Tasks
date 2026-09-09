@@ -24,6 +24,23 @@ settings:
     SWIFT_EMIT_LOC_STRINGS: YES
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
     CURRENT_PROJECT_VERSION: 96
+  # ── Fork addition (Activity plugin) ────────────────────────────────────────
+  # The build-time switch. With it unset — i.e. in Scott's tree, which has
+  # neither this block nor the Activity/ folders — every `#if VEYRN_ACTIVITY`
+  # seam compiles away and the product is his.
+  #
+  # `DEBUG` is spelled out rather than inherited. xcodegen's own Debug preset
+  # writes `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` into this very slot, so
+  # a value here REPLACES it — `$(inherited)` resolves against the xcconfig
+  # above, which does not define it, and Debug builds silently lost `DEBUG`.
+  # Verify after `make gen`:
+  #   xcodebuild -target VikunjaWidgetApp -configuration Debug -showBuildSettings \
+  #     | grep SWIFT_ACTIVE_COMPILATION_CONDITIONS   # → DEBUG VEYRN_ACTIVITY
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG VEYRN_ACTIVITY"
+    Release:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) VEYRN_ACTIVITY"
 
 configFiles:
   Debug: Signing.xcconfig

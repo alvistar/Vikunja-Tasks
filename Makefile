@@ -74,3 +74,12 @@ strings:
 	xcrun xcstringstool sync VikunjaCore/Localizable.xcstrings $$args; \
 	echo "✓ Catalog synced: $$(python3 -c \
 		"import json;print(len(json.load(open('VikunjaCore/Localizable.xcstrings'))['strings']))") strings"
+
+# ── Fork addition (Activity plugin) ───────────────────────────────────────────
+# Builds macOS with VEYRN_ACTIVITY undefined, i.e. the way Scott's tree builds.
+# It is the canary on a merge from upstream: the `#if` seams are not compiled
+# over there, so only this target ever proves they still line up.
+vanilla:
+	xcodebuild -project VikunjaWidget.xcodeproj -scheme VikunjaWidgetApp \
+		-configuration Debug build CODE_SIGNING_ALLOWED=NO \
+		SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG
