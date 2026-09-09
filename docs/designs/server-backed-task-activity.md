@@ -57,7 +57,7 @@ The compact single-line composer is **always visible below the preview**, with t
 
 ### Time and event language
 
-Activity groups events with localized calendar headings: `Today`, `Yesterday`, otherwise the locale’s full calendar date. Each row shows only the localized time. It never uses relative elapsed strings such as “18 min ago”, because the task diary must remain precise when read later. Automatic rows name a concrete server fact (`Task created`, `Completed <subtask title>`); comment rows lead with their author and text. Icons distinguish event kind but never carry meaning without the adjacent text.
+Each row carries its own localized timestamp: bare time for today, `Yesterday <time>`, otherwise the day (with the year, once it is not the current one) followed by the time. **This supersedes the original design**, which grouped rows under `Today` / `Yesterday` / date headings and left each row showing only a time — changed in `Redesign the task Activity surface` because a bare time reads as “today” to everyone, and on this instance comments are routinely days old, so a comment from 4 September and a task created this morning were indistinguishable in the rail. The rationale lives on `TaskActivityView.timeText`. It never uses relative elapsed strings such as “18 min ago”, because the task diary must remain precise when read later. Automatic rows name a concrete server fact (`Task created`, `Completed <subtask title>`); comment rows lead with their author and text. Icons distinguish event kind but never carry meaning without the adjacent text.
 
 ### Visible interaction states
 
