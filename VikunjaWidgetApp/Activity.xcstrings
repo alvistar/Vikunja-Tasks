@@ -142,6 +142,9 @@
     "Task #%lld" : {
       "comment" : "Pending Changes row fallback when the task isn't in the loaded lists"
     },
+    "The task this update belongs to was never created." : {
+      "comment" : "Shown for a queued comment whose offline task creation is gone"
+    },
     "The task will go back to the version on your server. Your change will be lost." : {
 
     },

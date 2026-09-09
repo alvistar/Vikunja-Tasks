@@ -312,27 +312,44 @@ final class TaskActivityCompanion {
         } while drainRequestedWhileDraining && store.reachability.isOnline
     }
 
-    /// Drops comment ops whose task create has provably gone away.
+    /// Fails comment ops whose task create has gone away, so they stop looking
+    /// like work in progress.
     ///
     /// `eligibleOperations()` filters out every `.client` ref, so such an op can
     /// only ever be sent after a remap — and once the create that would have
-    /// produced that remap is gone (discarded, or rejected 4xx by the task
-    /// drain), no remap can ever arrive. The op would sit there forever,
-    /// counted in the pill, deliverable by nothing.
+    /// produced that remap is gone, no remap can ever arrive. The op would
+    /// otherwise sit there forever, counted in the pill, deliverable by nothing.
     ///
-    /// **Destructive**: it drops text the user wrote, so it fires only on that
-    /// proof, and logs the count.
+    /// It marks rather than deletes, deliberately. The one case where dropping
+    /// the text is right is the user discarding the create themselves, and
+    /// `discardAny` already acknowledges the children there, under a
+    /// confirmation that says the text will be lost. Every other way a create
+    /// disappears is a failure the user never agreed to — a 4xx from the task
+    /// drain, or `sendBulkCreate` removing ops it could not remap because the
+    /// response came back shorter than the request (TaskStore.swift, "even if
+    /// the response were somehow shorter"). Acknowledging here would delete
+    /// what they wrote on the strength of that, with only a log line. Marked
+    /// instead, the text stays visible and copyable in the Pending Changes
+    /// sheet.
     private func sweepOrphans() {
         guard let store else { return }
         var swept = 0
         for op in commentOutbox.operations {
             guard case .client(let uuid) = op.taskRef else { continue }
             guard store.outbox.placeholderId(forClient: uuid) == nil else { continue }
-            commentOutbox.acknowledge(id: op.id)
+            guard op.state != .permanentlyFailed else { continue }
+            commentOutbox.markPermanentFailure(
+                id: op.id,
+                message: String(
+                    localized: "The task this update belongs to was never created.",
+                    table: "Activity",
+                    comment: "Shown for a queued comment whose offline task creation is gone"
+                )
+            )
             swept += 1
         }
         if swept > 0 {
-            DiagnosticLog.warn("comment outbox: swept \(swept) op(s) whose task create is gone")
+            DiagnosticLog.warn("comment outbox: \(swept) op(s) stranded — task create is gone")
         }
     }
 
@@ -385,6 +402,15 @@ final class TaskActivityCompanion {
     /// older build, which a fix inside `deleteAccount` never could.
     private func purgeOrphanAccountKeys() {
         let live = Set(VikunjaConfig.accounts.map(\.id.uuidString))
+        // An empty list is NOT proof that every account was deleted.
+        // `VikunjaConfig.loadAccounts()` returns [] whenever the App Group
+        // defaults are unavailable or the stored blob fails to decode, and this
+        // runs on every launch and every account switch. Without this guard,
+        // one transient read failure deletes every account-scoped key —
+        // including `vikunja.outbox.v1.<uuid>`, i.e. task creates and edits
+        // that exist nowhere else. There is nothing to sweep with no accounts
+        // anyway: the next launch that reads them successfully will do it.
+        guard !live.isEmpty else { return }
         let defaults = UserDefaults.standard
         let allKeys = Array(defaults.dictionaryRepresentation().keys)
         var removed = 0
