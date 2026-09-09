@@ -1,13 +1,16 @@
 import SwiftUI
 
-/// One row in the forked Pending Changes sheet.
+/// One row in the Pending Changes sheet — the fork's version of upstream's
+/// `PendingChange`, replacing it under the same name (see the sheet below).
 ///
-/// A superset of upstream's `PendingChange`: it carries the queued comment's
-/// text, why it stopped, and whether the user can ask for it again. Wrapping
-/// rather than extending keeps upstream's type untouched — that struct is
-/// memberwise-initialised in `TaskStore.pendingChanges`, so every field added
-/// to it is a line of drift in the highest-churn file in the fork.
-struct ActivityPendingRow: Identifiable {
+/// A superset: the six upstream fields keep their meaning and their order, and
+/// the four comment-only ones are appended **with defaults**, so
+/// `TaskStore.pendingChanges` keeps calling the memberwise initialiser with
+/// exactly upstream's six labelled arguments and needs no fork line at all.
+///
+/// If Scott adds or renames a field, this build breaks in
+/// `TaskStore.pendingChanges`. That is the intended signal.
+struct PendingChange: Identifiable {
     let id: UUID            // the queued op's id — the discard handle
     let icon: String        // SF Symbol
     let kindLabel: String   // "New task", "Edit", "Update", …
@@ -29,52 +32,32 @@ struct ActivityPendingRow: Identifiable {
     /// Discarding a queued comment does not touch the task, so the task-shaped
     /// warning copy would misdescribe it.
     var isComment: Bool = false
-
-    /// Lifts an upstream row unchanged. Every task-shaped field keeps its
-    /// meaning; only the comment-only fields default away.
-    init(_ change: PendingChange) {
-        self.id = change.id
-        self.icon = change.icon
-        self.kindLabel = change.kindLabel
-        self.taskTitle = change.taskTitle
-        self.queuedAt = change.queuedAt
-        self.deletesTask = change.deletesTask
-    }
-
-    init(
-        id: UUID, icon: String, kindLabel: String, taskTitle: String, queuedAt: Date,
-        deletesTask: Bool, body: String? = nil, errorMessage: String? = nil,
-        canRetry: Bool = false, isComment: Bool = false
-    ) {
-        self.id = id
-        self.icon = icon
-        self.kindLabel = kindLabel
-        self.taskTitle = taskTitle
-        self.queuedAt = queuedAt
-        self.deletesTask = deletesTask
-        self.body = body
-        self.errorMessage = errorMessage
-        self.canRetry = canRetry
-        self.isComment = isComment
-    }
 }
 
-/// A fork of upstream's `PendingChangesSheet`, presented in its place.
+/// A fork of upstream's `PendingChangesSheet`, compiled **in its place**: it
+/// takes upstream's own type names, and `project.yml` drops upstream's file
+/// from the two app targets. That is what lets `AppRoot` keep its original
+/// `PendingChangesSheet(store: store)` line — the swap costs zero upstream
+/// drift instead of five lines of `#if`.
 ///
 /// A copy rather than an edit because the feature changed nine things in it —
 /// the row layout, both confirmation dialogs, and all three footer buttons —
 /// which is +55/-8 of permanent conflict surface in a file upstream still
-/// touches. `PendingChangesSheet.swift` stays compiled and byte-identical to
-/// upstream; when it changes, port the change here by hand:
+/// touches. `VikunjaWidgetApp/PendingChangesSheet.swift` stays in the repo,
+/// byte-identical to upstream and merging cleanly; when it changes, port the
+/// change here by hand:
 ///
 ///     git diff <previous-merge>..main -- VikunjaWidgetApp/PendingChangesSheet.swift
 ///
-/// Compile errors catch API-shaped drift; visual drift is what that diff is for.
-struct ActivityPendingChangesSheet: View {
+/// Because it is no longer compiled, an API-shaped change over there does NOT
+/// break this build by itself. What does break is `TaskStore.pendingChanges`,
+/// which builds `PendingChange` above — so a changed field still stops the
+/// build, while a changed layout or wording is only ever visible in that diff.
+struct PendingChangesSheet: View {
     var store: TaskStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var changeToDiscard: ActivityPendingRow?
+    @State private var changeToDiscard: PendingChange?
     @State private var showDiscardAll = false
 
     var body: some View {
@@ -185,7 +168,7 @@ struct ActivityPendingChangesSheet: View {
         .safeAreaInset(edge: .bottom) { footerButtons }
     }
 
-    private func row(for change: ActivityPendingRow) -> some View {
+    private func row(for change: PendingChange) -> some View {
         HStack(spacing: 12) {
             Image(systemName: change.icon)
                 .foregroundStyle(.secondary)

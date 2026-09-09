@@ -111,6 +111,7 @@ targets:
       - path: VikunjaWidgetApp
         excludes:
           - InfoIOS.plist
+          - PendingChangesSheet.swift   # fork: replaced by Activity/PendingChangesSheet.swift
       - path: VikunjaCore
     entitlements:
       path: VikunjaWidgetApp/VikunjaWidgetApp.entitlements
@@ -172,6 +173,7 @@ targets:
         excludes:
           - Info.plist
           - AppIconMac.icon      # macOS-only icon; iOS keeps AppIcon.appiconset
+          - PendingChangesSheet.swift   # fork: replaced by Activity/PendingChangesSheet.swift
       - path: VikunjaCore
     entitlements:
       path: VikunjaWidgetApp/VikunjaWidgetAppIOS.entitlements

@@ -140,7 +140,7 @@ struct TaskActivityView: View {
         .background(insetBg)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .sheet(isPresented: $showPendingChanges) {
-            ActivityPendingChangesSheet(store: store)
+            PendingChangesSheet(store: store)
         }
         .task(id: task.id) {
             guard task.id > 0 else { return }

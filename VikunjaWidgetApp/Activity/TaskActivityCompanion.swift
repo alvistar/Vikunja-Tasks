@@ -7,10 +7,15 @@ import Observation
 ///
 /// A companion object rather than an extension because an extension cannot add
 /// stored properties, and a static side-table would not be observed — SwiftUI
-/// has to see the comment queue change. So the whole of the feature's mutable
-/// state lives here, and `TaskStore` carries exactly three fork lines: the
-/// property, `attach(to:)` at the end of `init`, and `reset(accountId:)` at the
-/// end of `resetPerAccountState`.
+/// has to see the comment queue change. A *singleton* because a stored property
+/// would have to live in `TaskStore.swift`, and `TaskStore()` is built exactly
+/// once (`VikunjaWidgetApp.swift`), so the two are the same object anyway. It
+/// is `@Observable` itself, so observation works through
+/// `TaskStore.activity`'s computed hop just as it did through a stored one.
+///
+/// So the whole of the feature's mutable state lives here, and `TaskStore`
+/// carries one fork line: `attach(to:)` at the end of `init`, inside the
+/// feature's `#if`.
 ///
 /// It couples to upstream by *observing* rather than by being called:
 ///
@@ -20,6 +25,8 @@ import Observation
 ///   drain, so an offline-created task's comments are already remapped;
 /// - the falling edge of `store.isLoading` re-reads the server capabilities and
 ///   repairs a failed identity fetch;
+/// - a *replacement* of `store.outbox` is the account switch, and drives the
+///   per-account reset — see `observeOutboxReplacement()`;
 /// - `Outbox.didRemap` carries the client-id -> server-id remap across.
 ///
 /// `drainOutbox()` raises `isDraining` before it checks whether the queue is
@@ -29,6 +36,9 @@ import Observation
 @Observable
 @MainActor
 final class TaskActivityCompanion {
+
+    /// Reached as `store.activity` (see `TaskStore+Activity.swift`).
+    static let shared = TaskActivityCompanion()
 
     private(set) var commentOutbox: CommentOutbox
 
@@ -58,10 +68,15 @@ final class TaskActivityCompanion {
     /// closed and reopened the task.
     private(set) var currentUser: VikunjaCurrentUser?
 
-    /// Weak: `TaskStore` owns this object.
+    /// Weak so a preview's discarded store does not stay alive through it.
     @ObservationIgnored private weak var store: TaskStore?
 
-    init() {
+    /// Identity of the `Outbox` this companion is currently keyed to.
+    /// A different one means `resetPerAccountState` ran — see
+    /// `observeOutboxReplacement()`.
+    @ObservationIgnored private var lastSeenOutbox: ObjectIdentifier?
+
+    private init() {
         commentOutbox = CommentOutbox(accountId: VikunjaConfig.activeAccount?.id)
     }
 
@@ -73,19 +88,30 @@ final class TaskActivityCompanion {
     /// persisted across a launch have to go out even if no task op is ever
     /// queued, and nothing else would raise `isDraining`.
     func attach(to store: TaskStore) {
+        if self.store != nil, self.store !== store {
+            // Only SwiftUI previews build a second store. Re-key onto it rather
+            // than leaving the observers armed on a dead one.
+            DiagnosticLog.info("activity companion re-attached to a new store")
+        }
         self.store = store
+        lastSeenOutbox = ObjectIdentifier(store.outbox)
+        // The pill and the Pending Changes sheet count comments through this,
+        // and it is read during a view body, so the queue's `@Observable`
+        // dependency is registered exactly as a direct read would be.
+        store.extraPendingCount = { [weak self] in self?.commentOutbox.operations.count ?? 0 }
         hookRemap()
         logLoadIssue()
         purgeOrphanAccountKeys()
         observeTaskDrain()
         observeRefresh()
+        observeOutboxReplacement()
         Task { await drain() }
     }
 
-    /// Called at the end of `TaskStore.resetPerAccountState`, which has already
-    /// replaced `store.outbox` by then — so the remap hook has to be re-armed
-    /// onto the new instance.
-    func reset(accountId: UUID?) {
+    /// Per-account reset. Driven by `observeOutboxReplacement()`, never called
+    /// from upstream: `resetPerAccountState` has replaced `store.outbox` by the
+    /// time this runs, so the remap hook is re-armed onto the new instance.
+    private func reset(accountId: UUID?) {
         commentOutbox = CommentOutbox(accountId: accountId)
         // Identity is per-account. Leaving the old one cached would let the
         // previous account's id decide which comments look editable.
@@ -117,6 +143,38 @@ final class TaskActivityCompanion {
                 self.observeTaskDrain()
                 guard self.store?.isDraining == false else { return }
                 await self.drain()
+            }
+        }
+    }
+
+    /// The account switch, observed instead of called.
+    ///
+    /// `TaskStore.resetPerAccountState` replaces `outbox` with one keyed to the
+    /// new account; `outbox` is an observable `private(set) var`, so the
+    /// replacement is visible here and nowhere else is a fork line needed.
+    /// `VikunjaConfig.setActive(id:)` runs *before* it (`switchAccount`), and
+    /// `clearForNoAccounts` has already cleared the account, so reading
+    /// `VikunjaConfig.activeAccount?.id` here gives the account the new outbox
+    /// was built for — upstream never has to pass it.
+    ///
+    /// Safety of the hop: `onChange` fires on `willSet`, but the `Task` body
+    /// runs only after the synchronous `resetPerAccountState` has returned, and
+    /// still before any subsequent drain — `switchAccount` yields the actor
+    /// only at its next `await`. The identity check makes it idempotent, so a
+    /// spurious edge costs nothing.
+    private func observeOutboxReplacement() {
+        guard let store else { return }
+        withObservationTracking {
+            _ = store.outbox
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.observeOutboxReplacement()
+                guard let store = self.store else { return }
+                let current = ObjectIdentifier(store.outbox)
+                guard current != self.lastSeenOutbox else { return }
+                self.lastSeenOutbox = current
+                self.reset(accountId: VikunjaConfig.activeAccount?.id)
             }
         }
     }

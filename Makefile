@@ -75,11 +75,42 @@ strings:
 	echo "✓ Catalog synced: $$(python3 -c \
 		"import json;print(len(json.load(open('VikunjaCore/Localizable.xcstrings'))['strings']))") strings"
 
-# ── Fork addition (Activity plugin) ───────────────────────────────────────────
-# Builds macOS with VEYRN_ACTIVITY undefined, i.e. the way Scott's tree builds.
-# It is the canary on a merge from upstream: the `#if` seams are not compiled
-# over there, so only this target ever proves they still line up.
+# ── Fork addition (Activity plugin) ─────────────────────────────────
+# Two canaries for the merge from upstream. Neither is run by a normal build.
+
+# `vanilla` — the plugin installed but switched OFF. Only the two
+# `#if VEYRN_ACTIVITY` seams compile away; every Activity/ file is still in the
+# target, so this proves the seams still line up against upstream's code. It
+# does NOT produce a feature-free binary — in a Debug build the plugin's
+# symbols are all still in Veyrn.debug.dylib. Use `uninstalled` for that.
 vanilla:
+	xcodebuild -project VikunjaWidget.xcodeproj -scheme VikunjaWidgetApp \
+		-configuration Debug build CODE_SIGNING_ALLOWED=NO \
+		SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG
+
+# `uninstalled` — the plugin REMOVED: both Activity/ folders moved aside, the
+# flag unset, and the `PendingChangesSheet.swift` exclude reverted so upstream's
+# own file compiles again. That is Scott's tree, and a green build here is the
+# claim the fork actually makes. Everything is restored on the way out, whether
+# it succeeded or not; the build products are left uninstalled, so the next
+# ordinary build is a full one.
+#
+# It regenerates through `make gen`, never bare `xcodegen generate`: xcodegen
+# rewrites all six entitlements files as empty plists, and restoring them is
+# what the rest of `gen` is for.
+uninstalled:
+	@set -e; \
+	tmp=$$(mktemp -d); \
+	trap 'mv "$$tmp/app" VikunjaWidgetApp/Activity 2>/dev/null; \
+	      mv "$$tmp/core" VikunjaCore/Activity 2>/dev/null; \
+	      mv "$$tmp/project.yml" project.yml 2>/dev/null; \
+	      rm -rf "$$tmp"; $(MAKE) gen >/dev/null; \
+	      echo "✓ plugin restored"' EXIT; \
+	cp project.yml "$$tmp/project.yml"; \
+	mv VikunjaWidgetApp/Activity "$$tmp/app"; \
+	mv VikunjaCore/Activity "$$tmp/core"; \
+	sed -i "" "/fork: replaced by Activity/d" project.yml; \
+	$(MAKE) gen >/dev/null; \
 	xcodebuild -project VikunjaWidget.xcodeproj -scheme VikunjaWidgetApp \
 		-configuration Debug build CODE_SIGNING_ALLOWED=NO \
 		SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG

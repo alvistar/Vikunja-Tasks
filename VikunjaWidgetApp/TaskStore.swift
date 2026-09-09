@@ -68,7 +68,11 @@ final class TaskStore {
     // MARK: - Offline infrastructure
 
     private(set) var outbox: Outbox
-    let activity = TaskActivityCompanion()  // fork: see TaskActivityCompanion.swift
+
+    /// Pending work tracked outside `outbox` by code layered on the store;
+    /// the pill and the sheet count it alongside the queued task ops.
+    var extraPendingCount: () -> Int = { 0 }
+    var pendingOperationCount: Int { outbox.ops.count + extraPendingCount() }
 
     /// Per-account expansion state for the nested project lists. Replaced on
     /// account switch alongside `outbox` (see `resetPerAccountState`).
@@ -87,7 +91,9 @@ final class TaskStore {
         projectExpansion = ProjectExpansion(accountId: accountId)
         loadCache()
         observeReachability()
-        activity.attach(to: self)
+        #if VEYRN_ACTIVITY
+        TaskActivityCompanion.shared.attach(to: self)
+        #endif
     }
 
     // MARK: - Derived helpers
@@ -543,7 +549,6 @@ final class TaskStore {
         outbox = Outbox(accountId: accountId)
         projectExpansion = ProjectExpansion(accountId: accountId)
         loggedProjectCycle = false
-        activity.reset(accountId: accountId)
         DiagnosticLog.info("outbox replaced")
 
         WidgetCache.clear()

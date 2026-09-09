@@ -284,7 +284,7 @@ struct AppRoot: View {
             BulkImportSheet(store: store)
         }
         .sheet(isPresented: $showPendingChanges) {
-            ActivityPendingChangesSheet(store: store)
+            PendingChangesSheet(store: store)
         }
         .environment(store)
     }

@@ -123,7 +123,9 @@ struct InlineTaskEditor: View {
                 if let subtasks = loadedSubtasks {
                     subtasksCard(subtasks).padding(.top, 16)
                 }
+                #if VEYRN_ACTIVITY
                 TaskActivityView(task: task).padding(.top, 16)
+                #endif
                 hairline.frame(height: 1).padding(.top, 16)
                 footerRow.padding(.top, 15)
             }

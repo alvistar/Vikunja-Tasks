@@ -10,6 +10,13 @@ import Foundation
 @MainActor
 extension TaskStore {
 
+    /// The feature's mutable state. A computed property onto the singleton
+    /// rather than a stored one, because a stored property would have to live
+    /// in `TaskStore.swift` — and `TaskStore()` is built exactly once
+    /// (`VikunjaWidgetApp.swift`), so a singleton is the same object either
+    /// way. Views keep reading `store.activity.…` unchanged.
+    var activity: TaskActivityCompanion { .shared }
+
     // MARK: - Rows for the forked Pending Changes sheet
 
     /// Upstream's rows plus the queued comments, interleaved chronologically.
@@ -21,15 +28,8 @@ extension TaskStore {
     ///
     /// Upstream's task rows are already in queue order (insertion order), so
     /// sorting by `queuedAt` changes nothing about their presentation.
-    var activityPendingRows: [ActivityPendingRow] {
-        (pendingChanges.map(ActivityPendingRow.init) + commentPendingRows)
-            .sorted { $0.queuedAt < $1.queuedAt }
-    }
-
-    /// Task ops plus comment ops. Drives the toolbar's "N pending" pill, which
-    /// otherwise under-reports and offers a sheet that lists more than it counts.
-    var pendingOperationCount: Int {
-        outbox.ops.count + activity.commentOutbox.operations.count
+    var activityPendingRows: [PendingChange] {
+        (pendingChanges + commentPendingRows).sorted { $0.queuedAt < $1.queuedAt }
     }
 
     /// True while either queue is draining. The sheet disables its destructive
@@ -54,7 +54,7 @@ extension TaskStore {
         await activity.retryComment(opId: opId)
     }
 
-    private var commentPendingRows: [ActivityPendingRow] {
+    private var commentPendingRows: [PendingChange] {
         activity.commentOutbox.operations.map { op in
             let label: String
             switch op.kind {
@@ -65,7 +65,7 @@ extension TaskStore {
             case .delete:
                 label = String(localized: "Deleted update", table: "Activity", comment: "Pending Changes row: a queued comment deletion")
             }
-            return ActivityPendingRow(
+            return PendingChange(
                 id: op.id,
                 icon: "text.bubble",
                 kindLabel: label,
