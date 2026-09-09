@@ -239,7 +239,7 @@ final class TaskStore {
                         }
                         continue
                     case .update(let commentId):
-                        _ = try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
+                        try await VikunjaAPI.updateComment(taskId: taskId, commentId: commentId, comment: op.text)
                     case .delete(let commentId):
                         try await VikunjaAPI.deleteComment(taskId: taskId, commentId: commentId)
                     }
@@ -249,7 +249,7 @@ final class TaskStore {
                     // be unit-tested; this only maps the transport error onto
                     // the policy's vocabulary.
                     let failure: CommentFailureKind
-                    if error is VikunjaAPI.V2NotAvailable {
+                    if error is VikunjaAPI.ActivityUnavailable {
                         failure = .notSupported
                     } else if let api = error as? VikunjaAPI.APIError {
                         if api.isGone { failure = .gone }

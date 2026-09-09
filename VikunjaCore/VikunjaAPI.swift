@@ -877,12 +877,12 @@ enum VikunjaAPI {
     // every account switch, since it's a single App Group key but different
     // accounts can point at servers on different versions.
 
-    private static var v2BaseURL: String {
+    static var v2BaseURL: String {
         let host = VikunjaConfig.host.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return "\(host)/api/v2"
     }
 
-    private static var supportsAPIv2: Bool {
+    static var supportsAPIv2: Bool {
         UserDefaults(suiteName: VikunjaConfig.appGroupSuite)?
             .bool(forKey: DiagnosticLog.serverSupportsV2DefaultsKey) ?? false
     }
@@ -894,11 +894,6 @@ enum VikunjaAPI {
     /// `TaskStore` decides whether to coalesce a run of queued creates before
     /// it calls the API. False until the launch's first `/info` probe lands,
     /// which just means an early drain takes the per-task path.
-    /// Comments are a v2-only endpoint. Exposed so the UI can hide the composer
-    /// and the activity feed rather than letting the user write an update that
-    /// can never be delivered on an older server.
-    static var supportsComments: Bool { supportsAPIv2 }
-
     static var supportsBulkTaskCreate: Bool {
         UserDefaults(suiteName: VikunjaConfig.appGroupSuite)?
             .bool(forKey: DiagnosticLog.serverSupportsBulkCreateDefaultsKey) ?? false
@@ -926,23 +921,11 @@ enum VikunjaAPI {
         }
     }
 
-    struct CommentPage: Equatable {
-        let items: [VikunjaComment]
-        let page: Int
-        let totalPages: Int
-
-        var hasEarlierPage: Bool { page < totalPages }
-    }
-
     /// Thrown by `searchDoneTasks` when the server doesn't support v2 — there
     /// is no v1 equivalent for server-side search, so `TaskStore` catches this
     /// (and any other failure) the same way: fall back to client-side
     /// filtering of what's already loaded.
-    /// Internal, not private: `TaskStore` must be able to tell "this server has
-    /// no v2 endpoint" from a transient failure. Caught as a retryable error it
-    /// would be re-sent every 60 s forever against a server that can never
-    /// answer, while blocking the task's activity refresh the whole time.
-    struct V2NotAvailable: Error {}
+    private struct V2NotAvailable: Error {}
 
     // MARK: - v2 request plumbing
 
@@ -1005,12 +988,6 @@ enum VikunjaAPI {
         _ = try await send(request)
     }
 
-    private static func putV2<T: Decodable>(_ path: String, body: Data, as type: T.Type) async throws -> T {
-        let request = makeRequest(path, method: "PUT", body: body, base: v2BaseURL)
-        let (data, _) = try await send(request)
-        return try JSONDecoder().decode(T.self, from: data)
-    }
-
     private static func deleteV2(_ path: String) async throws {
         let request = makeRequest(path, method: "DELETE", base: v2BaseURL)
         _ = try await send(request)
@@ -1046,45 +1023,7 @@ enum VikunjaAPI {
         return result.items ?? []
     }
 
-    // MARK: - Task comments (v2 only, verified against Vikunja 2.6)
-
-    static func fetchCommentPage(taskId: Int, page: Int = 1, perPage: Int = 50) async throws -> CommentPage {
-        guard supportsAPIv2 else { throw V2NotAvailable() }
-        // `sort_by=id&order_by=desc` is load-bearing, not a nicety. The server's
-        // default order is ASCENDING (verified 2026-09-08 against Vikunja 2.5.0:
-        // ids came back [7, 18], oldest first). Without this, page 1 is the
-        // OLDEST 50 comments — the collapsed Activity row would show the newest
-        // of the oldest page instead of the task's latest activity, and "Load
-        // earlier activity" would walk toward newer. Only visible past 50
-        // comments on one task, which is why nothing caught it.
-        let path = "/tasks/\(taskId)/comments?per_page=\(perPage)&page=\(page)&sort_by=id&order_by=desc"
-        let decoded: V2Page<VikunjaComment> = try await getV2(path, as: V2Page<VikunjaComment>.self)
-        return CommentPage(items: decoded.items ?? [], page: decoded.page ?? page, totalPages: max(1, decoded.totalPages ?? 1))
-    }
-
-    static func createComment(taskId: Int, comment: String) async throws -> VikunjaComment {
-        guard supportsAPIv2 else { throw V2NotAvailable() }
-        let body = try JSONEncoder().encode(["comment": comment])
-        return try await postV2("/tasks/\(taskId)/comments", body: body, as: VikunjaComment.self)
-    }
-
-    static func updateComment(taskId: Int, commentId: Int, comment: String) async throws -> VikunjaComment {
-        guard supportsAPIv2 else { throw V2NotAvailable() }
-        let body = try JSONEncoder().encode(["comment": comment])
-        return try await putV2("/tasks/\(taskId)/comments/\(commentId)", body: body, as: VikunjaComment.self)
-    }
-
-    static func deleteComment(taskId: Int, commentId: Int) async throws {
-        guard supportsAPIv2 else { throw V2NotAvailable() }
-        try await deleteV2("/tasks/\(taskId)/comments/\(commentId)")
-    }
-
-    static func fetchCurrentUser() async throws -> VikunjaCurrentUser {
-        guard supportsAPIv2 else { throw V2NotAvailable() }
-        return try await getV2("/user", as: VikunjaCurrentUser.self)
-    }
-
-    private static func makeRequest(_ path: String, method: String = "GET", body: Data? = nil, base: String? = nil) -> URLRequest {
+    static func makeRequest(_ path: String, method: String = "GET", body: Data? = nil, base: String? = nil) -> URLRequest {
         let baseURL = base ?? self.baseURL
         var request = URLRequest(url: URL(string: "\(baseURL)\(path)")!, timeoutInterval: 20)
         request.httpMethod = method
@@ -1110,7 +1049,7 @@ enum VikunjaAPI {
     /// in the state the caller asked for, not a failure. Nothing here sends
     /// conditional headers, so a 304 anywhere else would be a genuine surprise —
     /// and on a GET it would hand back an empty body to decode.
-    private static func send(
+    static func send(
         _ request: URLRequest,
         acceptingNotModified: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {

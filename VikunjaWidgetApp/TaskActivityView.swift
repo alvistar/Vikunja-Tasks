@@ -556,7 +556,7 @@ struct TaskActivityView: View {
             self.page = result.page
             hasEarlierPage = result.hasEarlierPage
             loadError = nil
-        } catch is VikunjaAPI.V2NotAvailable {
+        } catch is VikunjaAPI.ActivityUnavailable {
             // Terminal, not a blip. Offering "Retry" for a capability the
             // client already knows is absent is a button that can never work.
             loadError = String(
