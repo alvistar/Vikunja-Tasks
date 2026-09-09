@@ -108,6 +108,25 @@ final class AccountKeyPurgeTests: XCTestCase {
                        "another account's keys must never be purged")
     }
 
+    /// `accountId(in:)` is the inverse rule, and it is what lets the orphan
+    /// sweep run without being told which account died. It must agree with
+    /// `keysToPurge` on every key that carries a UUID, and refuse the rest —
+    /// a false positive here deletes a live account's queued comments.
+    func testAccountIdRoundTripsWithTheKeysThatCarryOne() {
+        let account = UUID()
+        for key in CommentOutbox.persistedKeys(accountId: account)
+            + ["veyrn.projectExpansion.\(account.uuidString)"] {
+            XCTAssertEqual(AccountKeyPurge.accountId(in: key), account.uuidString, key)
+        }
+    }
+
+    func testAccountIdRejectsKeysWithoutOne() {
+        XCTAssertNil(AccountKeyPurge.accountId(in: "vikunja.reachability"))
+        XCTAssertNil(AccountKeyPurge.accountId(in: "vikunja.outbox.v1"))
+        // 36 characters, but not a UUID.
+        XCTAssertNil(AccountKeyPurge.accountId(in: "veyrn.x.aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeez"))
+    }
+
     /// Cross-checks the rule against what CommentOutbox actually writes,
     /// instead of restating the predicate as a literal in the test.
     func testCoversEveryKeyCommentOutboxWrites() {

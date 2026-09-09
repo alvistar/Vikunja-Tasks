@@ -26,8 +26,36 @@ extension TaskStore {
             .sorted { $0.queuedAt < $1.queuedAt }
     }
 
+    /// Task ops plus comment ops. Drives the toolbar's "N pending" pill, which
+    /// otherwise under-reports and offers a sheet that lists more than it counts.
+    var pendingOperationCount: Int {
+        outbox.ops.count + activity.commentOutbox.operations.count
+    }
+
+    /// True while either queue is draining. The sheet disables its destructive
+    /// actions on this: `discardAny`/`discardEverything` refuse during a comment
+    /// drain, and gating only on `isDraining` left the buttons enabled so the
+    /// tap was swallowed with nothing but a log line.
+    var isBusy: Bool { isDraining || activity.isDraining }
+
+    /// "Try Again" in the sheet. Drains BOTH queues — upstream's button calls
+    /// `drainOutbox()` only, so a comment was untouched by the one control
+    /// offered for getting stuck work moving.
+    ///
+    /// It does not have to call the comment drain itself: `drainOutbox()`
+    /// raises and lowers `isDraining`, and the companion drains on that falling
+    /// edge, necessarily after the task ops have landed and remapped.
+    func retryAll() async {
+        activity.retryAllFailed()
+        await drainOutbox()
+    }
+
+    func retryComment(opId: UUID) async {
+        await activity.retryComment(opId: opId)
+    }
+
     private var commentPendingRows: [ActivityPendingRow] {
-        commentOutbox.operations.map { op in
+        activity.commentOutbox.operations.map { op in
             let label: String
             switch op.kind {
             case .create:
@@ -65,7 +93,7 @@ extension TaskStore {
     /// always `others`.
     var activityDiscardSummary: (creates: Int, others: Int) {
         let base = pendingDiscardSummary
-        return (base.creates, base.others + commentOutbox.operations.count)
+        return (base.creates, base.others + activity.commentOutbox.operations.count)
     }
 
     /// Reimplementation of upstream's `private func title(for:)`.
@@ -110,22 +138,20 @@ extension TaskStore {
     /// remap can ever arrive. Those ops would sit there forever, counted in the
     /// pill, deliverable by nothing.
     func discardAny(opId: UUID) async {
-        if commentOutbox.operations.contains(where: { $0.id == opId }) {
-            guard !isDrainingComments else {
+        if activity.commentOutbox.operations.contains(where: { $0.id == opId }) {
+            guard !activity.isDraining else {
                 DiagnosticLog.info("discard ignored — comment drain in progress")
                 return
             }
-            commentOutbox.acknowledge(id: opId)
+            activity.commentOutbox.acknowledge(id: opId)
             DiagnosticLog.info("discarded queued comment op")
             return
         }
 
         if let op = outbox.ops.first(where: { $0.id == opId }),
            case .create = op.kind, case .client(let uuid) = op.ref,
-           !isDraining, !isDrainingComments {
-            for commentOp in commentOutbox.operations where commentOp.taskRef == .client(uuid) {
-                commentOutbox.acknowledge(id: commentOp.id)
-            }
+           !isBusy {
+            activity.acknowledgeChildren(ofClientTask: uuid)
         }
 
         await discard(opId: opId)
@@ -141,12 +167,9 @@ extension TaskStore {
             DiagnosticLog.info("discardAll ignored — drain in progress")
             return
         }
-        let queuedComments = commentOutbox.operations
-        for commentOp in queuedComments {
-            commentOutbox.acknowledge(id: commentOp.id)
-        }
-        if !queuedComments.isEmpty {
-            DiagnosticLog.info("discard all: \(queuedComments.count) queued comment(s)")
+        let discarded = activity.acknowledgeAll()
+        if discarded > 0 {
+            DiagnosticLog.info("discard all: \(discarded) queued comment(s)")
         }
         await discardAll()
     }

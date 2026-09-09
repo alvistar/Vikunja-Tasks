@@ -102,6 +102,12 @@ final class Outbox {
         persist()
     }
 
+    /// Notified after every remap, with the client UUID and the server id it
+    /// resolved to. Lets a queue that keys off the same client UUID follow along
+    /// without `remap` knowing anything about it — `remap` and `remove` happen
+    /// in one synchronous step, so the change is not observable afterwards.
+    var didRemap: ((UUID, Int) -> Void)?
+
     func remap(client uuid: UUID, toServer id: Int) {
         for index in ops.indices {
             if case .client(let opUUID) = ops[index].ref, opUUID == uuid {
@@ -109,6 +115,7 @@ final class Outbox {
             }
         }
         persist()
+        didRemap?(uuid, id)
     }
 
     /// Reserves the next negative placeholder ID for an offline-created task.

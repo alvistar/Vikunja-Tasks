@@ -17,6 +17,10 @@ struct TaskActivityView: View {
     /// False for a terminal cause, so no Retry button is offered.
     @State private var canRetryLoad = true
     @State private var isExpanded = false
+    /// The banner's "Review updates" presents the sheet from here rather than
+    /// signalling AppRoot through a flag on the store. That flag was three
+    /// lines of fork state plus an `.onChange` block inside upstream's view.
+    @State private var showPendingChanges = false
     @State private var composer = ""
     /// Identifies a comment the user can act on.
     ///
@@ -67,13 +71,13 @@ struct TaskActivityView: View {
     /// in-place edit, or pending -> failed, leaves the count identical).
     private var overlayFingerprint: [String] {
         guard let taskRef else { return [] }
-        return store.commentOutbox.overlays(for: taskRef).map { overlay in
+        return store.activity.commentOutbox.overlays(for: taskRef).map { overlay in
             "\(overlay.id)|\(overlay.serverId.map(String.init) ?? "-")|\(overlay.text)|\(overlay.state)"
         }
     }
 
     private var items: [TaskActivityItem] {
-        let overlays = taskRef.map { store.commentOutbox.overlays(for: $0) } ?? []
+        let overlays = taskRef.map { store.activity.commentOutbox.overlays(for: $0) } ?? []
         return TaskActivityProjection.project(stamps: stamps, comments: comments, overlays: overlays)
     }
 
@@ -82,7 +86,7 @@ struct TaskActivityView: View {
         // queue an operation that can never be delivered, so offer nothing to
         // send rather than accepting text and failing later. Local-only
         // activity (created / completed) still has value, so the section stays.
-        let canComment = store.supportsComments
+        let canComment = store.activity.supportsComments
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -116,8 +120,8 @@ struct TaskActivityView: View {
             // and offline is exactly when BOTH happen, which made the banner
             // unreachable in its most important case. The user's own unsent
             // text outranks a stale read.
-            if let ref = taskRef, store.commentOutbox.hasFailure(for: ref) {
-                statusBanner("An update needs attention", action: "Review updates") { store.pendingChangesRequested = true }
+            if let ref = taskRef, store.activity.commentOutbox.hasFailure(for: ref) {
+                statusBanner("An update needs attention", action: "Review updates") { showPendingChanges = true }
             }
 
             if let loadError {
@@ -135,16 +139,19 @@ struct TaskActivityView: View {
         .padding(14)
         .background(insetBg)
         .clipShape(RoundedRectangle(cornerRadius: 18))
+        .sheet(isPresented: $showPendingChanges) {
+            ActivityPendingChangesSheet(store: store)
+        }
         .task(id: task.id) {
             guard task.id > 0 else { return }
-            store.refreshServerCapabilities()
+            store.activity.refreshServerCapabilities()
             // Best-effort: a failure costs the automatic rows, not the comments.
             stamps = try? await VikunjaAPI.fetchActivityStamps(taskId: task.id)
             await load(page: 1, append: false)
             // Cached on the store, per account. Held per-view with `try?` this
             // was one dropped request away from silently making every comment
             // look like someone else's.
-            await store.loadCurrentUserIfNeeded()
+            await store.activity.loadCurrentUserIfNeeded()
         }
         // Scoped to THIS task, and to a value that changes on state
         // transitions. Watching the global `operations.count` meant a comment
@@ -163,7 +170,7 @@ struct TaskActivityView: View {
             Button("Delete update", role: .destructive) {
                 if let pendingDelete {
                     if editingTarget == pendingDelete { cancelEditing() }
-                    store.queueCommentDelete(
+                    store.activity.queueCommentDelete(
                         task: task,
                         commentId: pendingDelete.commentId,
                         // Minted here, at action time — never in `body`.
@@ -322,13 +329,13 @@ struct TaskActivityView: View {
         // only the composer left Edit reachable from the menu and the swipe
         // row, which put the user into an edit mode with no field, no Save and
         // no Cancel — invisible and inescapable.
-        guard store.supportsComments else { return nil }
+        guard store.activity.supportsComments else { return nil }
 
         if item.commentId == nil {
             guard let overlay = item.localOverlay, overlay.state != .deleting else { return nil }
             return CommentTarget(commentId: nil, clientCommentId: overlay.id)
         }
-        guard let commentId = item.commentId, store.currentUser?.id == item.author?.id else { return nil }
+        guard let commentId = item.commentId, store.activity.currentUser?.id == item.author?.id else { return nil }
         // Reuse the queued op's client id when one exists, so an edit displaces
         // that op rather than racing it. Nil otherwise — see CommentTarget.
         return CommentTarget(commentId: commentId, clientCommentId: item.localOverlay?.id)
@@ -489,7 +496,7 @@ struct TaskActivityView: View {
                     let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
                     if let editingTarget {
-                        store.queueCommentUpdate(
+                        store.activity.queueCommentUpdate(
                             task: task,
                             commentId: editingTarget.commentId,
                             clientCommentId: editingTarget.clientCommentId ?? UUID(),
@@ -497,7 +504,7 @@ struct TaskActivityView: View {
                         )
                         self.editingTarget = nil
                     } else {
-                        store.queueComment(task: task, text: text)
+                        store.activity.queueComment(task: task, text: text)
                     }
                     composer = ""
                     isExpanded = true
@@ -533,7 +540,7 @@ struct TaskActivityView: View {
 
     private func load(page: Int, append: Bool) async {
         guard task.id > 0, let taskRef else { return }
-        guard !store.commentOutbox.blocksRefresh(for: taskRef) else { return }
+        guard !store.activity.commentOutbox.blocksRefresh(for: taskRef) else { return }
         isLoading = true
         defer { isLoading = false }
         do {

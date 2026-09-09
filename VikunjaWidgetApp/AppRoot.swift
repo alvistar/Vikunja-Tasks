@@ -283,11 +283,6 @@ struct AppRoot: View {
         .sheet(isPresented: $showBulkImport) {
             BulkImportSheet(store: store)
         }
-        .onChange(of: store.pendingChangesRequested) { _, requested in
-            guard requested else { return }
-            showPendingChanges = true
-            store.pendingChangesRequested = false
-        }
         .sheet(isPresented: $showPendingChanges) {
             ActivityPendingChangesSheet(store: store)
         }

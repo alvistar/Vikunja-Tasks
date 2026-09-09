@@ -205,7 +205,6 @@ targets:
           - VikunjaModels.swift
           - VikunjaAPI.swift
           - VikunjaConfig.swift
-          - AccountKeyPurge.swift
           - TokenStore.swift
           - QuickAddParser.swift
           - WidgetCache.swift
@@ -238,7 +237,6 @@ targets:
         includes:
           - VikunjaModels.swift
           - VikunjaConfig.swift
-          - AccountKeyPurge.swift
           - TokenStore.swift
           - WidgetCache.swift
           - ColorUtils.swift

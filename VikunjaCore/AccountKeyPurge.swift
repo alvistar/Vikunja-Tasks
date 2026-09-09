@@ -28,4 +28,22 @@ enum AccountKeyPurge {
             key.contains(id) && prefixes.contains { key.hasPrefix($0) }
         }
     }
+
+    /// The account UUID embedded in a key, if it carries one.
+    ///
+    /// The inverse of `keysToPurge`, and what lets the sweep run without being
+    /// told which account died: any key naming an account that no longer exists
+    /// is an orphan. That also cleans up after accounts deleted by an older
+    /// build, which a fix inside `deleteAccount` never could.
+    static func accountId(in key: String) -> String? {
+        // A UUID string is 36 characters and always follows a "." separator in
+        // these keys. Scanning the components is cheaper and less brittle than
+        // a regular expression, and rejects anything that is not a real UUID.
+        for component in key.split(separator: ".") where component.count == 36 {
+            if let uuid = UUID(uuidString: String(component)) {
+                return uuid.uuidString
+            }
+        }
+        return nil
+    }
 }

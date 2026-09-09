@@ -183,16 +183,8 @@ enum VikunjaConfig {
         persist(accts)
 
         TokenStore.deleteToken(for: id)
-        // The rule lives in AccountKeyPurge so it can be unit-tested; stating it
-        // inline here is how it rotted twice (first an enumerated list that
-        // missed the comment outbox, then a prefix rule that matched only
-        // "vikunja." while the current convention is "veyrn.").
-        for key in AccountKeyPurge.keysToPurge(
-            from: UserDefaults.standard.dictionaryRepresentation().keys,
-            accountId: id
-        ) {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
+        UserDefaults.standard.removeObject(forKey: "vikunja.outbox.v1.\(id.uuidString)")
+        UserDefaults.standard.removeObject(forKey: "vikunja.outbox.placeholderCounter.v1.\(id.uuidString)")
         DiagnosticLog.info("account deleted (now \(accts.count))")
 
         guard wasActive else { return }
