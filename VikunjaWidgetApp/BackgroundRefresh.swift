@@ -3,7 +3,7 @@ import BackgroundTasks
 import WidgetKit
 
 enum BackgroundRefresh {
-    static let taskId = "net.angstreich.VikunjaWidgetApp.refresh"
+    static let taskId = VikunjaConfig.appIdentifier + ".refresh"
 
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskId, using: nil) { task in

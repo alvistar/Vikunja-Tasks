@@ -13,7 +13,7 @@ import Security
 /// That is what makes the entitlement-based sharing above actually apply on
 /// macOS; without it the whole scheme silently degrades to a per-app store.
 enum TokenStore {
-    private static let service = "net.angstreich.VikunjaWidgetApp.token"
+    private static var service: String { VikunjaConfig.appIdentifier + ".token" }
 
     private static func query(account id: UUID) -> [String: Any] {
         [

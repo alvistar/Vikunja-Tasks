@@ -14,7 +14,8 @@ packages:
 settings:
   SWIFT_VERSION: "5"
   base:
-    # Signing is in Signing.xcconfig (git-ignored) so make gen never clobbers it.
+    # Signing lives in Signing.xcconfig (git-ignored), pulled in by
+    # Identifiers.xcconfig, so make gen never clobbers it.
     CODE_SIGN_STYLE: Automatic
     # Xcode recommended settings
     DEAD_CODE_STRIPPING: YES
@@ -24,10 +25,18 @@ settings:
     SWIFT_EMIT_LOC_STRINGS: YES
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
     CURRENT_PROJECT_VERSION: 96
+    # Every identifier the OS uses to tell one install from another derives from
+    # VEYRN_BUNDLE_PREFIX, which is defined in Identifiers.xcconfig. Do NOT set it
+    # here: a project-level setting outranks the xcconfig, so a fork's override in
+    # Signing.xcconfig would be ignored and its build would fight the shipped app
+    # over the app group, the keychain and the URL scheme.
+    VEYRN_APP_ID: $(VEYRN_BUNDLE_PREFIX).VikunjaWidgetApp
+    VEYRN_APP_GROUP: group.$(VEYRN_APP_ID)
+    VEYRN_ICLOUD_CONTAINER: iCloud.$(VEYRN_APP_ID)
 
 configFiles:
-  Debug: Signing.xcconfig
-  Release: Signing.xcconfig
+  Debug: Identifiers.xcconfig
+  Release: Identifiers.xcconfig
 
 schemes:
   VikunjaWidgetApp:
@@ -86,7 +95,7 @@ targets:
     entitlements:
       path: VikunjaWidgetApp/VikunjaWidgetApp.entitlements
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: net.angstreich.VikunjaWidgetApp
+      PRODUCT_BUNDLE_IDENTIFIER: $(VEYRN_APP_ID)
       PRODUCT_NAME: Veyrn
       MARKETING_VERSION: "3.4.0"
       GENERATE_INFOPLIST_FILE: NO
@@ -121,8 +130,9 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        VeyrnAppGroup: "$(VEYRN_APP_GROUP)"
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: net.angstreich.VikunjaWidgetApp.VikunjaWidgetExtension
+      PRODUCT_BUNDLE_IDENTIFIER: $(VEYRN_APP_ID).VikunjaWidgetExtension
       MARKETING_VERSION: "3.4.0"
       GENERATE_INFOPLIST_FILE: NO
       MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -147,7 +157,7 @@ targets:
     entitlements:
       path: VikunjaWidgetApp/VikunjaWidgetAppIOS.entitlements
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: net.angstreich.VikunjaWidgetApp
+      PRODUCT_BUNDLE_IDENTIFIER: $(VEYRN_APP_ID)
       PRODUCT_NAME: Veyrn
       MARKETING_VERSION: "3.4.0"
       GENERATE_INFOPLIST_FILE: NO
@@ -171,7 +181,7 @@ targets:
     entitlements:
       path: VikunjaWidgetExtension/VikunjaWidgetExtensionIOS.entitlements
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: net.angstreich.VikunjaWidgetApp.VikunjaWidgetExtension
+      PRODUCT_BUNDLE_IDENTIFIER: $(VEYRN_APP_ID).VikunjaWidgetExtension
       MARKETING_VERSION: "3.4.0"
       GENERATE_INFOPLIST_FILE: NO
       INFOPLIST_FILE: VikunjaWidgetExtension/Info.plist
@@ -204,7 +214,7 @@ targets:
     entitlements:
       path: VikunjaWidgetWatch/VikunjaWidgetWatch.entitlements
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: net.angstreich.VikunjaWidgetApp.watchkitapp
+      PRODUCT_BUNDLE_IDENTIFIER: $(VEYRN_APP_ID).watchkitapp
       PRODUCT_NAME: Veyrn
       MARKETING_VERSION: "3.4.0"
       GENERATE_INFOPLIST_FILE: NO
@@ -236,7 +246,7 @@ targets:
     entitlements:
       path: VikunjaWidgetWatchExtension/VikunjaWidgetWatchExtension.entitlements
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: net.angstreich.VikunjaWidgetApp.watchkitapp.widget
+      PRODUCT_BUNDLE_IDENTIFIER: $(VEYRN_APP_ID).watchkitapp.widget
       MARKETING_VERSION: "3.4.0"
       GENERATE_INFOPLIST_FILE: NO
       INFOPLIST_FILE: VikunjaWidgetWatchExtension/Info.plist

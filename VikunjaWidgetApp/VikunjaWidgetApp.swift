@@ -78,8 +78,8 @@ enum ShortcutRouting {
     static func route(_ item: UIApplicationShortcutItem) {
         let action: ShortcutRouter.ShortcutAction
         switch item.type {
-        case "net.angstreich.VikunjaWidgetApp.NewTask": action = .newTask
-        case "net.angstreich.VikunjaWidgetApp.Today":   action = .today
+        case VikunjaConfig.appIdentifier + ".NewTask": action = .newTask
+        case VikunjaConfig.appIdentifier + ".Today":   action = .today
         default: return
         }
         ShortcutRouter.shared.pendingAction = action

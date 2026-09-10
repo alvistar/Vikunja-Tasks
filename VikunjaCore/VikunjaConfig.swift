@@ -17,7 +17,20 @@ private struct LegacyAccountWithToken: Codable {
 }
 
 enum VikunjaConfig {
-    static let appGroupSuite = "group.net.angstreich.VikunjaWidgetApp"
+    /// Upstream's identifiers. A fork that overrides `VEYRN_BUNDLE_PREFIX` in
+    /// Signing.xcconfig gets its own here too, via the `VeyrnAppGroup` key every
+    /// target's Info.plist carries. The literal stays as the fallback so a bundle
+    /// built without the key (or a unit-test host) still finds the shipped data
+    /// instead of silently starting on an empty store.
+    static let appGroupSuite: String = {
+        let key = Bundle.main.object(forInfoDictionaryKey: "VeyrnAppGroup") as? String
+        guard let key, key.hasPrefix("group.") else { return "group.net.angstreich.VikunjaWidgetApp" }
+        return key
+    }()
+
+    /// The app's identifier, derived from the group so both can never disagree.
+    /// Used for the keychain service and the OS-facing ids (shortcuts, BGTask).
+    static let appIdentifier: String = String(appGroupSuite.dropFirst("group.".count))
     static let vikunjaCloudHost = "https://app.vikunja.cloud"
     static let maxAccounts = 5
     static let maxAccountNameLength = 32

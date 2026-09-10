@@ -12,15 +12,15 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.net.angstreich.VikunjaWidgetApp</string>
+		<string>$(VEYRN_APP_GROUP)</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)net.angstreich.VikunjaWidgetApp</string>
+		<string>$(AppIdentifierPrefix)$(VEYRN_APP_ID)</string>
 	</array>
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
-		<string>iCloud.net.angstreich.VikunjaWidgetApp</string>
+		<string>$(VEYRN_ICLOUD_CONTAINER)</string>
 	</array>
 	<key>com.apple.developer.icloud-services</key>
 	<array>
