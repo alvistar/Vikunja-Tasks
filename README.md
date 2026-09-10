@@ -1,5 +1,7 @@
 # Veyrn
 
+> **This is a fork.** Veyrn is written and maintained by Scott ([scottsapps/Vikunja-Tasks](https://github.com/scottsapps/Vikunja-Tasks)); this fork adds one feature he declined upstream as out of scope: **task Activity**, that is Vikunja's task comments plus a creation and completion timeline, with offline support. Everything else is his work, unchanged. Read [Why this fork exists](docs/explanation/why-this-fork.md) for the credits and the reasoning, and [docs/README.md](docs/README.md) for the fork's documentation. The App Store and TestFlight links below are the original app, which does not include Activity.
+
 ![Veyrn — your tasks, everywhere you work. A native Vikunja client for Mac, iPhone, and Apple Watch.](Veyrn-hero.png)
 
 A Things 3-style task management app for macOS, iOS, and watchOS that connects to any [Vikunja](https://vikunja.io) instance — self-hosted or Vikunja Cloud.
@@ -25,6 +27,7 @@ Beta Builds Available on [TestFlight](https://testflight.apple.com/join/q8GhTkFz
 - **Uses Vikunja's API v2** on instances reporting 2.4.0 or later, with automatic fallback to API v1 (reads only; v1 stays the permanent fallback until Vikunja removes it)
 - **Bulk import** — paste or drag in a plain-text list of tasks (created in one request on instances 2.5.0 or later)
 - **Rich text notes** — Vikunja's HTML task descriptions, with bold/italic/links/bullets
+- **Task Activity** *(fork only)* — Vikunja comments plus when the task and its subtasks were created and completed, on one timeline in the task editor; comments work offline and sync when you're back. See [How to use task Activity](docs/how-to/use-task-activity.md)
 - **Offline mode** — an outbox queues changes and drains when you're back online; a tappable "pending" pill opens a Pending Changes sheet to see why a change is stuck, retry it, or discard it
 - **Cross-device refresh** — a CloudKit change beacon nudges your other devices to refresh after an edit
 - **Multiple accounts** — up to 5 Vikunja accounts (same server or different ones), switched from Settings
@@ -221,9 +224,18 @@ An unsigned build gets **no entitlements**, so it's a compile check only, not a 
 - iOS 17.0+
 - watchOS 10.0+
 
+## Documentation
+
+Upstream's documentation is this README. The fork's own documentation, covering the Activity feature, the build switch, the tests and how to merge from upstream, is in [`docs/`](docs/README.md):
+
+- [Why this fork exists](docs/explanation/why-this-fork.md)
+- [Tutorial: your first task diary](docs/tutorials/first-task-diary.md)
+- [How to use task Activity](docs/how-to/use-task-activity.md) · [How to build the fork](docs/how-to/build-the-fork.md) · [How to merge from upstream](docs/how-to/merge-from-upstream.md)
+- [Task Activity reference](docs/reference/task-activity.md) · [Activity architecture](docs/explanation/activity-architecture.md)
+
 ## Bugs & Feedback
 
-In the app: **Settings → Report a Bug**, which lets you attach a diagnostic log (readable in full before you send it). Or email scottsapps at protonmail dot com.
+For the Activity feature, or anything else that differs from upstream, open an issue on [the fork](https://github.com/alvistar/Vikunja-Tasks/issues); do not send fork bugs to Scott. For everything else, in the app: **Settings → Report a Bug**, which lets you attach a diagnostic log (readable in full before you send it). Or email scottsapps at protonmail dot com.
 
 ## Support
 
