@@ -76,7 +76,11 @@ Replace `XXXXXXXXXX` with your 10-character Apple Developer Team ID, found in Xc
 
 The two app targets carry **CloudKit** and **Push Notifications** entitlements (for the cross-device change beacon), plus an iCloud container identifier written by the Makefile. Change that identifier (see the forking table below), then enable both capabilities for your App ID and create the CloudKit container — at [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list), or let Xcode's automatic signing register them on the first signed build. A build with the wrong or unregistered container fails to sign.
 
-The build number lives in `project.yml` (`CURRENT_PROJECT_VERSION`, under `settings.base`), **not** here and not in Xcode's UI — project settings override the xcconfig, and editing it in Xcode only touches the generated `.xcodeproj`, which the next `make gen` overwrites. Bump it there before each TestFlight/App Store upload.
+The fork's version lives in `VERSION` at the repo root, and `make gen` writes it into
+the git-ignored `Version.xcconfig` that every target's `MARKETING_VERSION` reads — so
+the number in About cannot disagree with the number in the repo. It is the fork's own
+semver line, not Scott's; `CHANGELOG.md` records which upstream commit each release
+sits on. The build number is separate and still lives in `project.yml` (`CURRENT_PROJECT_VERSION`, under `settings.base`), **not** here and not in Xcode's UI — project settings override the xcconfig, and editing it in Xcode only touches the generated `.xcodeproj`, which the next `make gen` overwrites. Bump it there before each TestFlight/App Store upload.
 
 ### 4. Replace the TelemetryDeck identifiers
 

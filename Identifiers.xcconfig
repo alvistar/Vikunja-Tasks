@@ -9,4 +9,12 @@
 
 VEYRN_BUNDLE_PREFIX = net.angstreich
 
+// The fork's own release line. VERSION at the repo root is the source of truth;
+// `make gen` writes it into Version.xcconfig, which the six MARKETING_VERSION
+// settings read. The default below only shows up if someone builds without
+// running `make gen` — which cannot happen, since that step also generates the
+// .xcodeproj, so a 0.0.0 in an artifact means the generated file went missing.
+VEYRN_MARKETING_VERSION = 0.0.0
+
+#include? "Version.xcconfig"
 #include? "Signing.xcconfig"
