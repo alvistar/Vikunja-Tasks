@@ -849,7 +849,12 @@ private struct MacTitleTextField: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NonSelectingNSTextField, context: Context) -> CGSize? {
         let width = proposal.width ?? 400
         nsView.preferredMaxLayoutWidth = width
-        let height = nsView.intrinsicContentSize.height
+        // intrinsicContentSize only honours preferredMaxLayoutWidth under Auto
+        // Layout; here it always reports a single line, so a wrapped title got
+        // clipped. Ask the cell to lay itself out at the proposed width instead.
+        let bounds = NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)
+        let height = nsView.cell?.cellSize(forBounds: bounds).height
+            ?? nsView.intrinsicContentSize.height
         return CGSize(width: width, height: max(height, 28))
     }
 
