@@ -28,6 +28,20 @@ enum VikunjaConfig {
         return key
     }()
 
+    /// True when the Info.plist key was missing or malformed and the literal
+    /// above was used. Harmless on an upstream build, where they are the same
+    /// string. On a fork build it means this binary is reading a group it is
+    /// not entitled to: `UserDefaults(suiteName:)` does not fail on one, it
+    /// hands back a store that reads empty, and the keychain service moves with
+    /// it — so one target goes blank and looks like a signed-out account.
+    /// Surfaced in the diagnostic log header rather than logged from here:
+    /// DiagnosticLog resolves its own directory through `appGroupSuite`, so a
+    /// log call inside this type's initializers would re-enter them.
+    static let appGroupUsedFallback: Bool = {
+        let key = Bundle.main.object(forInfoDictionaryKey: "VeyrnAppGroup") as? String
+        return key?.hasPrefix("group.") != true
+    }()
+
     /// The app's identifier, derived from the group so both can never disagree.
     /// Used for the keychain service and the OS-facing ids (shortcuts, BGTask).
     static let appIdentifier: String = String(appGroupSuite.dropFirst("group.".count))

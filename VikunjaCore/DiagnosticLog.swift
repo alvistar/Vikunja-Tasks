@@ -412,8 +412,14 @@ enum DiagnosticLog {
         let offsetSecs = tz.secondsFromGMT()
         let offsetStr = String(format: "UTC%+03d:%02d", offsetSecs / 3600, abs(offsetSecs % 3600) / 60)
 
+        // Only present when it fired, so its absence is the normal case and
+        // its presence is the first thing anyone reads.
+        let groupWarning = VikunjaConfig.appGroupUsedFallback
+            ? "\nWARNING:  VeyrnAppGroup missing from Info.plist — fell back to \(VikunjaConfig.appGroupSuite)"
+            : ""
+
         return """
-        === Veyrn diagnostic log ===
+        === Veyrn diagnostic log ===\(groupWarning)
         App:      Veyrn \(shortVersion) (\(build))  [\(processKind.rawValue)]
         Platform: \(platformDescription())
         Locale:   \(Locale.current.identifier)    Timezone: \(tz.identifier) (\(offsetStr))

@@ -116,31 +116,64 @@ On first launch, go to Settings and enter:
 
 ## Forking: identifiers you must change
 
-Start here — it finds most of them:
+One setting covers most of them. `Identifiers.xcconfig` (checked in) holds:
 
-```bash
-grep -rn "net\.angstreich" --include="*.swift" --include="*.plist" . project.yml Makefile
+```
+VEYRN_BUNDLE_PREFIX = net.angstreich
 ```
 
-**Required.** Miss any of these and the app misbehaves, usually without an error:
+and ends with `#include? "Signing.xcconfig"`. That file is git-ignored, so put
+your own prefix there next to your `DEVELOPMENT_TEAM` and nothing about the
+override reaches a pull request:
+
+```
+DEVELOPMENT_TEAM = ABCDE12345
+VEYRN_BUNDLE_PREFIX = com.example
+```
+
+The include comes last on purpose: in an xcconfig the last assignment wins.
+
+From that one value, `project.yml` derives `VEYRN_APP_ID`, `VEYRN_APP_GROUP` and
+`VEYRN_ICLOUD_CONTAINER`, and those feed the six bundle ids, the six entitlements
+files the Makefile generates, and every Info.plist. Swift reads the App Group
+from the `VeyrnAppGroup` Info.plist key once, in `VikunjaConfig.appGroupSuite`,
+and derives the keychain service, the background-refresh task id and the iOS
+Quick Action types from it — so those can never drift apart.
+
+Do **not** set `VEYRN_BUNDLE_PREFIX` in `project.yml`. A project-level build
+setting outranks the project xcconfig, so your override in `Signing.xcconfig`
+would be ignored without a word.
+
+Check what you actually got:
+
+```bash
+xcodebuild -project VikunjaWidget.xcodeproj -target VikunjaWidgetApp \
+  -configuration Debug -showBuildSettings \
+  | grep -E "VEYRN_|PRODUCT_BUNDLE_IDENTIFIER"
+```
+
+**Still yours to change by hand:**
 
 | What | Where |
 |---|---|
-| Bundle ID prefix | `project.yml` — `bundleIdPrefix`, plus the six explicit `PRODUCT_BUNDLE_IDENTIFIER` lines |
-| Bundle IDs in plists | `VikunjaWidgetApp/Info.plist`, `VikunjaWidgetApp/InfoIOS.plist` (`CFBundleIdentifier`) |
-| **App Group** | `Makefile` (written into all six entitlements files), `VikunjaCore/VikunjaConfig.swift` (`appGroupSuite`), `VikunjaCore/WidgetCache.swift` (`suiteName`) |
-| **Keychain access group** | `Makefile` (all six entitlements) |
-| **Keychain service** | `VikunjaCore/TokenStore.swift` (`service`) |
-| iCloud container id | `Makefile` (`com.apple.developer.icloud-container-identifiers`, written into the two app entitlements) — `iCloud.net.angstreich.VikunjaWidgetApp`; must also exist as a CloudKit container on your account |
-| Background refresh task id | `VikunjaWidgetApp/BackgroundRefresh.swift` (`taskId`) **and** `InfoIOS.plist` (`BGTaskSchedulerPermittedIdentifiers`) — these two must match |
-| iOS Quick Action types | `VikunjaWidgetApp/VikunjaWidgetApp.swift` (two `case` strings) **and** `InfoIOS.plist` (`UIApplicationShortcutItems`) — must match |
-| Watch companion app | `VikunjaWidgetWatch/Info.plist` (`WKCompanionAppBundleIdentifier`) — must be your iOS app's bundle ID |
 | **Bug report email** | `VikunjaWidgetApp/BugReportMail.swift` (`supportAddress`) — otherwise your users' bug reports come to *me* |
 | TelemetryDeck App ID + namespace | `VikunjaWidgetApp/VeyrnTelemetry.swift` |
+| CloudKit container | `iCloud.<your prefix>.VikunjaWidgetApp` is generated for you, but it must also exist as a container on your Apple developer account, along with the App Group and the keychain group — otherwise signing fails at build time |
 
-The bold rows are the ones that bite silently. The App Group, Keychain access group, and iCloud container id are all written by the **Makefile**, not by `project.yml`, so changing the bundle prefix alone leaves them pointing at this project. Get the App Group or Keychain group wrong and the app builds, launches, and then can't share credentials or cached tasks with its own widgets; get the iCloud container wrong and signing fails at build time.
+**Cosmetic**, safe to leave: dispatch queue labels (`DiagnosticLog.swift`,
+`HangWatchdog.swift`), `Notification.Name` strings (`ShortcutRouter.swift`,
+`HotkeyRecorderView.swift`), the `Logger` subsystem in `CompleteTaskIntent.swift`,
+and the `vikunja://` / `veyrn://` URL schemes in the plists.
 
-**Cosmetic**, safe to leave: dispatch queue labels (`DiagnosticLog.swift`, `HangWatchdog.swift`), `Notification.Name` strings (`ShortcutRouter.swift`, `HotkeyRecorderView.swift`), the `Logger` subsystem in `CompleteTaskIntent.swift`, and the `vikunja://` / `veyrn://` URL schemes in the plists (only worth changing if you'd otherwise clash with an installed copy of Veyrn).
+If a target's Info.plist ever loses the `VeyrnAppGroup` key, that target falls
+back to upstream's group — a group your build is not entitled to, which reads
+empty rather than failing, so the target looks signed out while the others are
+fine. The diagnostic log header says so explicitly when it happens:
+
+```
+=== Veyrn diagnostic log ===
+WARNING:  VeyrnAppGroup missing from Info.plist — fell back to group.net.angstreich.VikunjaWidgetApp
+```
 
 ## Project Structure
 
