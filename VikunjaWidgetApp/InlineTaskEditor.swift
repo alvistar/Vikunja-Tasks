@@ -807,6 +807,18 @@ struct InlineTaskEditor: View {
 
 #if os(macOS)
 private final class NonSelectingNSTextField: NSTextField {
+    // Opening the editor must not drop a caret into the title. AppKit hands a
+    // freshly presented sheet its initial first responder, and this is the
+    // sheet's first editable view, so the title would start out in edit mode.
+    // That hand-off happens while the sheet window is not key yet — measured:
+    // `isKeyWindow == false`, on an AppKit-defined event. A click or a Tab
+    // always arrives after the window is key, so both still focus the title
+    // normally.
+    override func becomeFirstResponder() -> Bool {
+        guard window?.isKeyWindow == true else { return false }
+        return super.becomeFirstResponder()
+    }
+
     // macOS calls selectText(_:) when a text field becomes key; overriding it
     // lets us redirect to a cursor-at-end placement instead of select-all.
     override func selectText(_ sender: Any?) {
