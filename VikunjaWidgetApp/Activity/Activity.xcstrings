@@ -1,0 +1,187 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "\"%@\" was never uploaded to your server, so discarding it deletes it permanently." : {
+
+    },
+    "Activity" : {
+      "comment" : "Heading of the task activity section"
+    },
+    "Add an update" : {
+
+    },
+    "Add update" : {
+
+    },
+    "All changes synced" : {
+
+    },
+    "An update needs attention" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Couldn’t load earlier activity" : {
+      "comment" : "Activity paging error"
+    },
+    "Couldn’t load newer activity" : {
+      "comment" : "Activity refresh error"
+    },
+    "Delete" : {
+      "comment" : "Swipe action on a comment"
+    },
+    "Delete Task" : {
+
+    },
+    "Delete this task?" : {
+
+    },
+    "Delete this update?" : {
+
+    },
+    "Delete update" : {
+
+    },
+    "Delete update…" : {
+
+    },
+    "Deleted update" : {
+      "comment" : "Pending Changes row: a queued comment deletion"
+    },
+    "Discard" : {
+
+    },
+    "Discard All" : {
+
+    },
+    "Discard Change" : {
+
+    },
+    "Discard all pending changes?" : {
+
+    },
+    "Discard this change?" : {
+
+    },
+    "Discard this update?" : {
+
+    },
+    "Done" : {
+
+    },
+    "Edit" : {
+      "comment" : "Swipe action on a comment"
+    },
+    "Edit update" : {
+
+    },
+    "Edit your update" : {
+
+    },
+    "Edited update" : {
+      "comment" : "Pending Changes row: a queued edit to a comment"
+    },
+    "Editing your update" : {
+
+    },
+    "Everything on this device has reached your server." : {
+
+    },
+    "Hide activity" : {
+
+    },
+    "Load earlier activity" : {
+
+    },
+    "Loading activity…" : {
+
+    },
+    "More actions for your update" : {
+
+    },
+    "New task" : {
+      "comment" : "Pending Changes row: a queued task creation"
+    },
+    "No activity yet. Comments and completed subtasks appear here." : {
+
+    },
+    "Not sent" : {
+
+    },
+    "Not sent. It may already have posted — check the task before retrying." : {
+      "comment" : "Shown when a comment request failed with no answer, so it may or may not have been saved"
+    },
+    "Pending Changes" : {
+
+    },
+    "Removing" : {
+
+    },
+    "Retry" : {
+
+    },
+    "Review updates" : {
+
+    },
+    "Save update" : {
+
+    },
+    "Sending" : {
+
+    },
+    "Show %lld activity items" : {
+
+    },
+    "Show less" : {
+
+    },
+    "Show more" : {
+
+    },
+    "Task #%lld" : {
+      "comment" : "Pending Changes row fallback when the task isn't in the loaded lists"
+    },
+    "The task this update belongs to was never created." : {
+      "comment" : "Shown for a queued comment whose offline task creation is gone"
+    },
+    "The task will go back to the version on your server. Your change will be lost." : {
+
+    },
+    "This removes it for everyone on the task." : {
+
+    },
+    "This server doesn’t support comments." : {
+      "comment" : "Shown when the Vikunja server has no v2 comment API"
+    },
+    "This will delete ^[%lld new task](inflect: true) and undo ^[%lld change](inflect: true). This cannot be undone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This will delete ^[%1$lld new task](inflect: true) and undo ^[%2$lld change](inflect: true). This cannot be undone."
+          }
+        }
+      }
+    },
+    "This will delete ^[%lld new task](inflect: true). This cannot be undone." : {
+
+    },
+    "This will undo ^[%lld change](inflect: true). This cannot be undone." : {
+
+    },
+    "Try Again" : {
+
+    },
+    "Update" : {
+      "comment" : "Pending Changes row: a queued comment on a task"
+    },
+    "Yesterday %@" : {
+      "comment" : "Timestamp on an activity row, e.g. Yesterday 14:32"
+    },
+    "Your update won't be posted, and the text will be lost." : {
+
+    }
+  },
+  "version" : "1.0"
+}

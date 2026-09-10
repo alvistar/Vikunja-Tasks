@@ -34,6 +34,24 @@ settings:
     VEYRN_APP_GROUP: group.$(VEYRN_APP_ID)
     VEYRN_ICLOUD_CONTAINER: iCloud.$(VEYRN_APP_ID)
 
+  # ── Fork addition (Activity plugin) ────────────────────────────────────────
+  # The build-time switch. With it unset — i.e. in Scott's tree, which has
+  # neither this block nor the Activity/ folders — every `#if VEYRN_ACTIVITY`
+  # seam compiles away and the product is his.
+  #
+  # `DEBUG` is spelled out rather than inherited. xcodegen's own Debug preset
+  # writes `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` into this very slot, so
+  # a value here REPLACES it — `$(inherited)` resolves against the xcconfig
+  # above, which does not define it, and Debug builds silently lost `DEBUG`.
+  # Verify after `make gen`:
+  #   xcodebuild -target VikunjaWidgetApp -configuration Debug -showBuildSettings \
+  #     | grep SWIFT_ACTIVE_COMPILATION_CONDITIONS   # → DEBUG VEYRN_ACTIVITY
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG VEYRN_ACTIVITY"
+    Release:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) VEYRN_ACTIVITY"
+
 configFiles:
   Debug: Identifiers.xcconfig
   Release: Identifiers.xcconfig
@@ -81,6 +99,18 @@ schemes:
     archive:
       config: Release
 
+  # ── Fork addition (Activity plugin) ──────────────────────────────────────
+  # Its own scheme rather than an edit to VikunjaWidgetApp's test action, so
+  # every fork-only line in this file sits in one contiguous block.
+  VeyrnCoreTests:
+    build:
+      targets:
+        VeyrnCoreTests: [test]
+    test:
+      config: Debug
+      targets:
+        - VeyrnCoreTests
+
 targets:
   # ── macOS ────────────────────────────────────────────────────────────────
 
@@ -91,6 +121,7 @@ targets:
       - path: VikunjaWidgetApp
         excludes:
           - InfoIOS.plist
+          - PendingChangesSheet.swift   # fork: replaced by Activity/PendingChangesSheet.swift
       - path: VikunjaCore
     entitlements:
       path: VikunjaWidgetApp/VikunjaWidgetApp.entitlements
@@ -153,6 +184,7 @@ targets:
         excludes:
           - Info.plist
           - AppIconMac.icon      # macOS-only icon; iOS keeps AppIcon.appiconset
+          - PendingChangesSheet.swift   # fork: replaced by Activity/PendingChangesSheet.swift
       - path: VikunjaCore
     entitlements:
       path: VikunjaWidgetApp/VikunjaWidgetAppIOS.entitlements
@@ -255,3 +287,23 @@ targets:
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
+
+  # ── Fork addition (Activity plugin) ──────────────────────────────────────
+  VeyrnCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: VeyrnCoreTests
+      - path: VikunjaCore
+        includes:
+          - Outbox.swift
+          - Activity/CommentOutbox.swift
+          - Activity/CommentDrainPolicy.swift
+          - Activity/AccountKeyPurge.swift
+          - Activity/TaskActivity.swift
+          - Activity/TaskActivityModels.swift
+          - TaskMerger.swift
+          - VikunjaModels.swift
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      MACOSX_DEPLOYMENT_TARGET: "14.0"

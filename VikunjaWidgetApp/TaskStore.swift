@@ -69,6 +69,11 @@ final class TaskStore {
 
     private(set) var outbox: Outbox
 
+    /// Pending work tracked outside `outbox` by code layered on the store;
+    /// the pill and the sheet count it alongside the queued task ops.
+    var extraPendingCount: () -> Int = { 0 }
+    var pendingOperationCount: Int { outbox.ops.count + extraPendingCount() }
+
     /// Per-account expansion state for the nested project lists. Replaced on
     /// account switch alongside `outbox` (see `resetPerAccountState`).
     private(set) var projectExpansion: ProjectExpansion
@@ -86,6 +91,9 @@ final class TaskStore {
         projectExpansion = ProjectExpansion(accountId: accountId)
         loadCache()
         observeReachability()
+        #if VEYRN_ACTIVITY
+        TaskActivityCompanion.shared.attach(to: self)
+        #endif
     }
 
     // MARK: - Derived helpers

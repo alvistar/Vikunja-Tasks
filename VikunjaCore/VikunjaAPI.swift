@@ -877,12 +877,12 @@ enum VikunjaAPI {
     // every account switch, since it's a single App Group key but different
     // accounts can point at servers on different versions.
 
-    private static var v2BaseURL: String {
+    static var v2BaseURL: String {
         let host = VikunjaConfig.host.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return "\(host)/api/v2"
     }
 
-    private static var supportsAPIv2: Bool {
+    static var supportsAPIv2: Bool {
         UserDefaults(suiteName: VikunjaConfig.appGroupSuite)?
             .bool(forKey: DiagnosticLog.serverSupportsV2DefaultsKey) ?? false
     }
@@ -1023,7 +1023,7 @@ enum VikunjaAPI {
         return result.items ?? []
     }
 
-    private static func makeRequest(_ path: String, method: String = "GET", body: Data? = nil, base: String? = nil) -> URLRequest {
+    static func makeRequest(_ path: String, method: String = "GET", body: Data? = nil, base: String? = nil) -> URLRequest {
         let baseURL = base ?? self.baseURL
         var request = URLRequest(url: URL(string: "\(baseURL)\(path)")!, timeoutInterval: 20)
         request.httpMethod = method
@@ -1049,7 +1049,7 @@ enum VikunjaAPI {
     /// in the state the caller asked for, not a failure. Nothing here sends
     /// conditional headers, so a 304 anywhere else would be a genuine surprise —
     /// and on a GET it would hand back an empty body to decode.
-    private static func send(
+    static func send(
         _ request: URLRequest,
         acceptingNotModified: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
