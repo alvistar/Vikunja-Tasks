@@ -810,6 +810,18 @@ struct InlineTaskEditor: View {
 
 #if os(macOS)
 private final class NonSelectingNSTextField: NSTextField {
+    // Opening the editor must not drop a caret into the title. AppKit hands a
+    // freshly presented sheet its initial first responder, and this is the
+    // sheet's first editable view, so the title would start out in edit mode.
+    // That hand-off happens while the sheet window is not key yet — measured:
+    // `isKeyWindow == false`, on an AppKit-defined event. A click or a Tab
+    // always arrives after the window is key, so both still focus the title
+    // normally.
+    override func becomeFirstResponder() -> Bool {
+        guard window?.isKeyWindow == true else { return false }
+        return super.becomeFirstResponder()
+    }
+
     // macOS calls selectText(_:) when a text field becomes key; overriding it
     // lets us redirect to a cursor-at-end placement instead of select-all.
     override func selectText(_ sender: Any?) {
@@ -852,7 +864,12 @@ private struct MacTitleTextField: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NonSelectingNSTextField, context: Context) -> CGSize? {
         let width = proposal.width ?? 400
         nsView.preferredMaxLayoutWidth = width
-        let height = nsView.intrinsicContentSize.height
+        // intrinsicContentSize only honours preferredMaxLayoutWidth under Auto
+        // Layout; here it always reports a single line, so a wrapped title got
+        // clipped. Ask the cell to lay itself out at the proposed width instead.
+        let bounds = NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)
+        let height = nsView.cell?.cellSize(forBounds: bounds).height
+            ?? nsView.intrinsicContentSize.height
         return CGSize(width: width, height: max(height, 28))
     }
 

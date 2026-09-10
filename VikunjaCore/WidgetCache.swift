@@ -3,7 +3,7 @@ import Foundation
 // Shared cache between the app and widget extension, stored in the App Group container.
 // Both processes write here on a successful fetch; the widget reads it as a fallback when offline.
 enum WidgetCache {
-    private static let suiteName = "group.net.angstreich.VikunjaWidgetApp"
+    private static var suiteName: String { VikunjaConfig.appGroupSuite }
     private static let tasksKey = "widget.cache.tasks"
     private static let projectsKey = "widget.cache.projects"
     private static let savedAtKey = "widget.cache.savedAt"

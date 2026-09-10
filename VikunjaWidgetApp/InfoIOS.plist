@@ -24,7 +24,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>net.angstreich.VikunjaWidgetApp</string>
+			<string>$(VEYRN_APP_ID)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>vikunja</string>
@@ -35,7 +35,7 @@
 	<array>
 		<dict>
 			<key>UIApplicationShortcutItemType</key>
-			<string>net.angstreich.VikunjaWidgetApp.NewTask</string>
+			<string>$(VEYRN_APP_ID).NewTask</string>
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>New Task</string>
 			<key>UIApplicationShortcutItemIconType</key>
@@ -43,7 +43,7 @@
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemType</key>
-			<string>net.angstreich.VikunjaWidgetApp.Today</string>
+			<string>$(VEYRN_APP_ID).Today</string>
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>Scheduled</string>
 			<key>UIApplicationShortcutItemIconType</key>
@@ -54,7 +54,7 @@
 	<false/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>net.angstreich.VikunjaWidgetApp.refresh</string>
+		<string>$(VEYRN_APP_ID).refresh</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
@@ -87,5 +87,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>VeyrnAppGroup</key>
+	<string>$(VEYRN_APP_GROUP)</string>
 </dict>
 </plist>

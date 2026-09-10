@@ -17,7 +17,34 @@ private struct LegacyAccountWithToken: Codable {
 }
 
 enum VikunjaConfig {
-    static let appGroupSuite = "group.net.angstreich.VikunjaWidgetApp"
+    /// Upstream's identifiers. A fork that overrides `VEYRN_BUNDLE_PREFIX` in
+    /// Signing.xcconfig gets its own here too, via the `VeyrnAppGroup` key every
+    /// target's Info.plist carries. The literal stays as the fallback so a bundle
+    /// built without the key (or a unit-test host) still finds the shipped data
+    /// instead of silently starting on an empty store.
+    static let appGroupSuite: String = {
+        let key = Bundle.main.object(forInfoDictionaryKey: "VeyrnAppGroup") as? String
+        guard let key, key.hasPrefix("group.") else { return "group.net.angstreich.VikunjaWidgetApp" }
+        return key
+    }()
+
+    /// True when the Info.plist key was missing or malformed and the literal
+    /// above was used. Harmless on an upstream build, where they are the same
+    /// string. On a fork build it means this binary is reading a group it is
+    /// not entitled to: `UserDefaults(suiteName:)` does not fail on one, it
+    /// hands back a store that reads empty, and the keychain service moves with
+    /// it — so one target goes blank and looks like a signed-out account.
+    /// Surfaced in the diagnostic log header rather than logged from here:
+    /// DiagnosticLog resolves its own directory through `appGroupSuite`, so a
+    /// log call inside this type's initializers would re-enter them.
+    static let appGroupUsedFallback: Bool = {
+        let key = Bundle.main.object(forInfoDictionaryKey: "VeyrnAppGroup") as? String
+        return key?.hasPrefix("group.") != true
+    }()
+
+    /// The app's identifier, derived from the group so both can never disagree.
+    /// Used for the keychain service and the OS-facing ids (shortcuts, BGTask).
+    static let appIdentifier: String = String(appGroupSuite.dropFirst("group.".count))
     static let vikunjaCloudHost = "https://app.vikunja.cloud"
     static let maxAccounts = 5
     static let maxAccountNameLength = 32

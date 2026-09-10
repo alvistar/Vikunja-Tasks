@@ -1,0 +1,20 @@
+// Identifiers every install is told apart by. Upstream's values are the default;
+// a fork overrides VEYRN_BUNDLE_PREFIX in Signing.xcconfig (git-ignored) to get an
+// app that coexists with the shipped one — its own app group, keychain, iCloud
+// container and URL name — without a rename showing up in every pull request.
+//
+// The include comes last on purpose: in an xcconfig the last assignment wins, so
+// Signing.xcconfig can override the default above it. It also carries
+// DEVELOPMENT_TEAM. The `?` makes it optional, so a fresh clone still generates.
+
+VEYRN_BUNDLE_PREFIX = net.angstreich
+
+// The fork's own release line. VERSION at the repo root is the source of truth;
+// `make gen` writes it into Version.xcconfig, which the six MARKETING_VERSION
+// settings read. The default below only shows up if someone builds without
+// running `make gen` — which cannot happen, since that step also generates the
+// .xcodeproj, so a 0.0.0 in an artifact means the generated file went missing.
+VEYRN_MARKETING_VERSION = 0.0.0
+
+#include? "Version.xcconfig"
+#include? "Signing.xcconfig"

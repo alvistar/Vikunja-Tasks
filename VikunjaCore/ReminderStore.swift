@@ -49,7 +49,7 @@ enum ReminderStore {
     private static let tombstoneUpdatedSlack: TimeInterval = 120
 
     private static var tombstoneStore: UserDefaults? {
-        UserDefaults(suiteName: "group.net.angstreich.VikunjaWidgetApp")
+        UserDefaults(suiteName: VikunjaConfig.appGroupSuite)
     }
 
     /// Current tombstones with expired entries dropped.
